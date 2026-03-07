@@ -15,4 +15,17 @@ include:
 ## Inputs
 
 <!-- sf:component:start -->
+## `stagefreight`
+
+### Ungrouped
+| Name | Required | Default | Description |
+|------|----------|---------|-------------|
+| `stagefreight_image` | ❌ | `docker.io/prplanit/stagefreight:latest-dev` | StageFreight image to use for the build |
+| `dind_image` | ❌ | `docker.io/docker:27-dind` | Docker-in-Docker service image |
+| `stagefreight_args` | ❌ | - | Additional arguments passed to stagefreight docker build |
+| `security_scan` | ❌ | `true` | Run security scan after build |
+| `security_detail` | ❌ | `counts` | Security detail level for release notes (none, counts, detailed, full) |
+| `release_enabled` | ❌ | `true` | Create a release on the forge after build |
+
+
 <!-- sf:component:end -->
