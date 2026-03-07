@@ -21,7 +21,7 @@ policies:
 builds:
   - id: stagefreight
     kind: docker
-    build_mode: crucible
+    # build_mode: crucible  # disabled for one build to publish fixes into latest-dev
     platforms: [linux/amd64]
 
 targets:

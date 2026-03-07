@@ -5,6 +5,8 @@ import (
 	"crypto/rand"
 	"fmt"
 	"io"
+	"net"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -121,8 +123,12 @@ func RunCrucible(ctx context.Context, opts CrucibleOpts) (*CrucibleResult, error
 
 	args := []string{"run", "--rm", "--network", "host"}
 
-	// Docker socket: forward DOCKER_HOST + TLS vars, or mount the socket
-	dockerHost := os.Getenv("DOCKER_HOST")
+	// Docker socket: forward DOCKER_HOST + TLS vars, or mount the socket.
+	// When DOCKER_HOST uses a hostname (e.g. tcp://docker:2376 in GitLab CI
+	// DinD), resolve it to an IP now — the pass-2 container runs with
+	// --network host and won't be on the CI runner's Docker network where
+	// the hostname resolves.
+	dockerHost := resolveDockerHost(os.Getenv("DOCKER_HOST"))
 	if dockerHost != "" {
 		args = append(args, "-e", "DOCKER_HOST="+dockerHost)
 		for _, tlsVar := range []string{"DOCKER_TLS_VERIFY", "DOCKER_CERT_PATH"} {
@@ -208,6 +214,39 @@ func CleanupCrucibleImages(ctx context.Context, tags ...string) error {
 		return fmt.Errorf("cleanup: %s", strings.Join(errs, "; "))
 	}
 	return nil
+}
+
+// resolveDockerHost resolves hostnames in DOCKER_HOST to IPs.
+// In GitLab CI DinD, DOCKER_HOST is typically tcp://docker:2376 where "docker"
+// only resolves on the CI runner's Docker network. Since the pass-2 container
+// uses --network host, it needs the resolved IP instead.
+// Returns the original value unchanged if empty, already an IP, or unresolvable.
+func resolveDockerHost(dockerHost string) string {
+	if dockerHost == "" {
+		return ""
+	}
+	u, err := url.Parse(dockerHost)
+	if err != nil {
+		return dockerHost
+	}
+	hostname := u.Hostname()
+	if hostname == "" || net.ParseIP(hostname) != nil {
+		return dockerHost // already an IP or unparseable
+	}
+	ips, err := net.LookupHost(hostname)
+	if err != nil || len(ips) == 0 {
+		return dockerHost // can't resolve, return as-is
+	}
+	// Prefer IPv4 — Docker daemon in DinD is typically IPv4-only.
+	chosen := ips[0]
+	for _, ip := range ips {
+		if net.ParseIP(ip).To4() != nil {
+			chosen = ip
+			break
+		}
+	}
+	u.Host = net.JoinHostPort(chosen, u.Port())
+	return u.String()
 }
 
 // CrucibleCheck is a single verification data point.

@@ -797,7 +797,7 @@ func runCrucibleMode(cmd *cobra.Command, args []string) error {
 			"self-build verified — the calf has forged itself and joins the herd", color)
 	} else {
 		output.SummaryRow(w, "crucible", "failed",
-			"self-build failed — the calf could not forge itself", color)
+			"self-build failed — this StageFreight calf was not yet mature enough to assume leadership of the tribe.", color)
 	}
 
 	// Provenance
