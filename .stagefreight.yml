@@ -211,3 +211,4 @@ lint:
 security:
   enabled: true
   sbom: true
+  release_detail: full
