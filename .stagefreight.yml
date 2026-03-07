@@ -2,13 +2,14 @@ version: 1
 
 vars:
   org: prplanit
+  github_org: sofmeright
   repo: stagefreight
 
 sources:
   primary:
     kind: git
     worktree: "."
-    url: "https://github.com/{var:org}/{var:repo}"
+    url: "https://github.com/{var:github_org}/{var:repo}"
     default_branch: "main"
 
 policies:
@@ -82,7 +83,7 @@ targets:
     when: { branches: [main], events: [push, tag] }
     file: "README.md"
     description: "Declarative CI/CD CLI — detect, build, scan, and release container images from one manifest"
-    link_base: "https://github.com/{var:org}/{var:repo}/blob/main"
+    link_base: "https://github.com/{var:github_org}/{var:repo}/blob/main"
 
   # ── GitLab component catalog ─────────────────────────────────────
   - id: gitlab-catalog
@@ -99,7 +100,7 @@ targets:
 
 narrator:
   - file: "README.md"
-    link_base: "https://github.com/{var:org}/{var:repo}/blob/main"
+    link_base: "https://github.com/{var:github_org}/{var:repo}/blob/main"
     items:
       - id: badge.release
         kind: badge
@@ -112,7 +113,7 @@ narrator:
         font: dejavu-sans
         font_size: 11
         output: ".stagefreight/badges/release.svg"
-        link: "https://github.com/{var:org}/{var:repo}/releases"
+        link: "https://github.com/{var:github_org}/{var:repo}/releases"
 
       - id: badge.build
         kind: badge
@@ -125,7 +126,7 @@ narrator:
         color: auto
         font: monofur
         output: ".stagefreight/badges/build.svg"
-        link: "https://github.com/{var:org}/{var:repo}/actions"
+        link: "https://github.com/{var:github_org}/{var:repo}/actions"
 
       - id: badge.license
         kind: badge
