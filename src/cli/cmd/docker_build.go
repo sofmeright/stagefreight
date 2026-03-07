@@ -249,6 +249,7 @@ func runDockerBuild(cmd *cobra.Command, args []string) error {
 		version.Version,
 		version.Commit,
 		buildMode,
+		"",
 	)
 	build.InjectLabels(plan, stdLabels)
 
@@ -537,7 +538,11 @@ func runCrucibleMode(cmd *cobra.Command, args []string) error {
 	// Crucible Context section — mode, lifecycle, and execution details
 	crucibleCtx := output.NewSection(w, "Crucible Context", 0, color)
 	crucibleCtx.Row("%-16s%s", "mode", "crucible")
-	crucibleCtx.Row("%-16s%s", "stage", "CALF — self-build verification")
+	crucibleEpoch := fmt.Sprintf("%d", pipelineStart.Unix())
+	crucibleCreated := time.Unix(pipelineStart.Unix(), 0).UTC().Format(time.RFC3339)
+
+	crucibleCtx.Row("%-16s%s", "phase", "self-build verification")
+	crucibleCtx.Row("%-16s%s", "epoch", crucibleEpoch)
 	crucibleCtx.Row("%-16s%s", "passes", "2 (gestation → crucible)")
 	crucibleCtx.Row("%-16s%s", "candidate", crucibleTag)
 	crucibleCtx.Row("%-16s%s", "verify", finalTag)
@@ -616,6 +621,7 @@ func runCrucibleMode(cmd *cobra.Command, args []string) error {
 		version.Version,
 		version.Commit,
 		"crucible-gestation",
+		crucibleCreated,
 	)
 	build.InjectLabels(plan, gestLabels)
 	planElapsed := time.Since(planStart)
@@ -708,6 +714,8 @@ func runCrucibleMode(cmd *cobra.Command, args []string) error {
 			break
 		}
 	}
+	// Forward SOURCE_DATE_EPOCH to pin timestamps across passes
+	envVars = append(envVars, "SOURCE_DATE_EPOCH="+crucibleEpoch)
 	// Forward CI env vars
 	for _, ciVar := range []string{
 		"CI", "CI_PIPELINE_ID", "CI_COMMIT_SHORT_SHA", "CI_COMMIT_SHA",

@@ -23,9 +23,12 @@ const (
 
 // StandardLabels returns the set of OCI labels that should be applied to
 // every image built by StageFreight, regardless of build mode.
-func StandardLabels(planHash, sfVersion, commit, mode string) map[string]string {
+func StandardLabels(planHash, sfVersion, commit, mode, createdRFC3339 string) map[string]string {
+	if createdRFC3339 == "" {
+		createdRFC3339 = time.Now().UTC().Format(time.RFC3339)
+	}
 	labels := map[string]string{
-		LabelCreated:  time.Now().UTC().Format(time.RFC3339),
+		LabelCreated:  createdRFC3339,
 		LabelPlanHash: planHash,
 	}
 	if sfVersion != "" {
