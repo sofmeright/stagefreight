@@ -26,6 +26,4 @@ include:
 | `security_scan` | ❌ | `true` | Run security scan after build |
 | `security_detail` | ❌ | `counts` | Security detail level for release notes (none, counts, detailed, full) |
 | `release_enabled` | ❌ | `true` | Create a release on the forge after build |
-
-
 <!-- sf:component:end -->
