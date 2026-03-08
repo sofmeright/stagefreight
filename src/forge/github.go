@@ -114,6 +114,9 @@ func (g *GitHubForge) CreateRelease(ctx context.Context, opts ReleaseOptions) (*
 		"draft":      opts.Draft,
 		"prerelease": opts.Prerelease,
 	}
+	if opts.Ref != "" {
+		payload["target_commitish"] = opts.Ref
+	}
 
 	var resp struct {
 		ID      int    `json:"id"`

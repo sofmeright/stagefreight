@@ -91,6 +91,9 @@ func (g *GitLabForge) CreateRelease(ctx context.Context, opts ReleaseOptions) (*
 		"name":        opts.Name,
 		"description": opts.Description,
 	}
+	if opts.Ref != "" {
+		payload["ref"] = opts.Ref
+	}
 
 	var resp struct {
 		TagName string `json:"tag_name"`

@@ -88,6 +88,7 @@ type Forge interface {
 // ReleaseOptions configures a new release.
 type ReleaseOptions struct {
 	TagName     string
+	Ref         string // commit SHA, branch, or tag to create the release from (required by GitLab when tag doesn't exist)
 	Name        string
 	Description string // markdown body (release notes)
 	Draft       bool

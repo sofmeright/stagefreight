@@ -397,6 +397,7 @@ func runReleaseCreate(cmd *cobra.Command, args []string) error {
 				// Try create, fallback to delete+recreate on conflict
 				_, err := forgeClient.CreateRelease(ctx, forge.ReleaseOptions{
 					TagName:     rt,
+					Ref:         tag,
 					Name:        rt,
 					Description: fmt.Sprintf("Rolling tag for %s", tag),
 					Prerelease:  rcPrerelease,
@@ -406,6 +407,7 @@ func runReleaseCreate(cmd *cobra.Command, args []string) error {
 					_ = forgeClient.DeleteRelease(ctx, rt)
 					_, err = forgeClient.CreateRelease(ctx, forge.ReleaseOptions{
 						TagName:     rt,
+						Ref:         tag,
 						Name:        rt,
 						Description: fmt.Sprintf("Rolling tag for %s", tag),
 						Prerelease:  rcPrerelease,
