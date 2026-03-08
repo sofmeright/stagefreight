@@ -82,8 +82,18 @@ func DetectScopedVersion(rootDir string, scope string) (*VersionInfo, error) {
 		if scope != "" {
 			cand = strings.TrimPrefix(cand, scope+"-")
 		}
-		if ver, ok := tryParseSemver(cand); ok {
-			v.Version = ver
+		if m := semverRe.FindStringSubmatch(cand); m != nil {
+			v.Major = m[1]
+			v.Minor = m[2]
+			v.Patch = m[3]
+			v.Base = fmt.Sprintf("%s.%s.%s", m[1], m[2], m[3])
+			if m[4] != "" {
+				v.Prerelease = m[4]
+				v.IsPrerelease = true
+				v.Version = fmt.Sprintf("%s-%s", v.Base, v.Prerelease)
+			} else {
+				v.Version = v.Base
+			}
 			v.IsRelease = true
 			return v, nil
 		}
