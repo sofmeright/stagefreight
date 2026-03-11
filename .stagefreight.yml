@@ -282,7 +282,7 @@ narrator:
           between: ["<!-- sf:image:start -->", "<!-- sf:image:end -->"]
           mode: replace
         text: latest
-        value: "v{version}"
+        value: "v{base}"
         color: "#74ecbe"
         output: ".stagefreight/badges/latest.svg"
         link: "https://hub.docker.com/r/{var:org}/{var:repo}/tags?name=latest"

@@ -31,7 +31,6 @@ build-image:
     - docker context create tls-context --docker "host=$DOCKER_HOST,ca=$DOCKER_CERT_PATH/ca.pem,cert=$DOCKER_CERT_PATH/cert.pem,key=$DOCKER_CERT_PATH/key.pem"
     - docker buildx create --name stagefreight-builder --use tls-context
   script:
-    - export STAGEFREIGHT_ALLOW_CRUCIBLE=1  # temporary: old image has sofmeright module guard
     - stagefreight docker build
   rules:
     - if: '$CI_COMMIT_TAG'
