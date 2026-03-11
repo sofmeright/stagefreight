@@ -23,6 +23,7 @@ start tracking there.
 
 ### Medium Interest
 
+- [ ] Rehearsals — composable verification ([docs/Rehearsals.md](Rehearsals.md)) — shell backend first, language-agnostic
 - [ ] [Custom release pattern templates](#freshness-p3-custom-release-pattern-templates) — user escape hatch for non-standard tags
 - [ ] [Auditable failure messages](#freshness-p4-auditable-failure-messages) — structured warnings for registry failures and parse errors
 - [ ] [OCI manifest annotation fetching](#freshness-p5-oci-manifest-annotation-fetching) — `image.version` for ambiguous tags
