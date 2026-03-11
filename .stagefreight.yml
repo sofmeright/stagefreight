@@ -265,7 +265,7 @@ narrator:
           between: ["<!-- sf:image:start -->", "<!-- sf:image:end -->"]
           mode: replace
         text: updated
-        value: "{env:BUILD_DATE}"
+        value: "{docker.tag.v{version}.updated}"
         color: "#236144"
         output: ".stagefreight/badges/release-updated.svg"
 
@@ -275,10 +275,10 @@ narrator:
           between: ["<!-- sf:image:start -->", "<!-- sf:image:end -->"]
           mode: replace
         text: size
-        value: "{docker.size}"
+        value: "{docker.tag.v{version}.size}"
         color: "#555"
         output: ".stagefreight/badges/release-size.svg"
-        link: "https://hub.docker.com/r/{var:org}/{var:repo}/tags?name=latest"
+        link: "https://hub.docker.com/r/{var:org}/{var:repo}/tags?name=v{version}"
 
       - id: image.break2
         kind: break
@@ -311,7 +311,7 @@ narrator:
           between: ["<!-- sf:image:start -->", "<!-- sf:image:end -->"]
           mode: replace
         text: updated
-        value: "{env:BUILD_DATE}"
+        value: "{docker.tag.latest-dev.updated}"
         color: "#236144"
         output: ".stagefreight/badges/dev-updated.svg"
 
@@ -321,7 +321,7 @@ narrator:
           between: ["<!-- sf:image:start -->", "<!-- sf:image:end -->"]
           mode: replace
         text: size
-        value: "{docker.size}"
+        value: "{docker.tag.latest-dev.size}"
         color: "#555"
         output: ".stagefreight/badges/dev-size.svg"
         link: "https://hub.docker.com/r/{var:org}/{var:repo}/tags?name=latest-dev"

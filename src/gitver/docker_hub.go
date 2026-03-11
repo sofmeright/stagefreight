@@ -4,17 +4,26 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
 )
 
+// TagInfo holds metadata for a single Docker Hub tag.
+type TagInfo struct {
+	Size        int64
+	Digest      string
+	LastUpdated time.Time
+}
+
 // DockerHubInfo holds metadata fetched from the Docker Hub API.
 type DockerHubInfo struct {
-	Pulls  int64  // total pull count
-	Stars  int    // star count
-	Size   int64  // compressed size of latest tag in bytes
-	Latest string // digest of latest tag (sha256:...)
+	Pulls  int64              // total pull count
+	Stars  int                // star count
+	Size   int64              // compressed size of latest tag in bytes
+	Latest string             // digest of latest tag (sha256:...)
+	Tags   map[string]TagInfo // per-tag metadata
 }
 
 // FetchDockerHubInfo retrieves repository metadata from Docker Hub.
@@ -52,7 +61,7 @@ func FetchDockerHubInfo(namespace, repo string) (*DockerHubInfo, error) {
 		defer tagResp.Body.Close()
 		if tagResp.StatusCode == http.StatusOK {
 			var tagData struct {
-				FullSize int64 `json:"full_size"`
+				FullSize int64  `json:"full_size"`
 				Digest   string `json:"digest"`
 				Images   []struct {
 					Size   int64  `json:"size"`
@@ -78,6 +87,59 @@ func FetchDockerHubInfo(namespace, repo string) (*DockerHubInfo, error) {
 	return info, nil
 }
 
+// FetchTagInfo retrieves metadata for specific tags from Docker Hub.
+// Best-effort: tags that 404 or error are silently skipped.
+func FetchTagInfo(client *http.Client, namespace, repo string, tags []string) map[string]TagInfo {
+	result := make(map[string]TagInfo, len(tags))
+	for _, tag := range tags {
+		tagURL := fmt.Sprintf(
+			"https://hub.docker.com/v2/repositories/%s/%s/tags/%s",
+			namespace, repo, url.PathEscape(tag),
+		)
+		resp, err := client.Get(tagURL)
+		if err != nil {
+			continue
+		}
+		func() {
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusOK {
+				return
+			}
+			var data struct {
+				FullSize    int64  `json:"full_size"`
+				Digest      string `json:"digest"`
+				LastUpdated string `json:"last_updated"`
+				Images      []struct {
+					Size   int64  `json:"size"`
+					Digest string `json:"digest"`
+				} `json:"images"`
+			}
+			if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+				return
+			}
+			ti := TagInfo{
+				Size:   data.FullSize,
+				Digest: data.Digest,
+			}
+			if ti.Size == 0 && len(data.Images) > 0 {
+				for _, img := range data.Images {
+					ti.Size += img.Size
+				}
+			}
+			if ti.Digest == "" && len(data.Images) > 0 {
+				ti.Digest = data.Images[0].Digest
+			}
+			if data.LastUpdated != "" {
+				if t, err := time.Parse(time.RFC3339Nano, data.LastUpdated); err == nil {
+					ti.LastUpdated = t
+				}
+			}
+			result[tag] = ti
+		}()
+	}
+	return result
+}
+
 // ResolveDockerTemplates replaces {docker.*} templates with values from Docker Hub.
 // Returns s unchanged if info is nil or no {docker.} templates are present.
 func ResolveDockerTemplates(s string, info *DockerHubInfo) string {
@@ -92,7 +154,129 @@ func ResolveDockerTemplates(s string, info *DockerHubInfo) string {
 	s = strings.ReplaceAll(s, "{docker.size}", formatBytes(info.Size))
 	s = strings.ReplaceAll(s, "{docker.latest}", shortDigest(info.Latest))
 
+	s = resolveTagTemplates(s, info.Tags)
+
 	return s
+}
+
+// tagSuffix maps a known placeholder suffix to its formatting function.
+type tagSuffix struct {
+	pattern string
+	format  func(TagInfo) string
+}
+
+// knownTagSuffixes lists recognized {docker.tag.TAG.FIELD} suffixes.
+// Order matters: longer/more-specific patterns first (size:raw before size).
+var knownTagSuffixes = []tagSuffix{
+	{".size:raw}", func(ti TagInfo) string { return strconv.FormatInt(ti.Size, 10) }},
+	{".size}", func(ti TagInfo) string { return formatBytes(ti.Size) }},
+	{".updated}", func(ti TagInfo) string {
+		if ti.LastUpdated.IsZero() {
+			return ""
+		}
+		return ti.LastUpdated.Format("2006-01-02")
+	}},
+	{".digest}", func(ti TagInfo) string { return shortDigest(ti.Digest) }},
+}
+
+// resolveTagTemplates replaces {docker.tag.TAG.FIELD} patterns with per-tag values.
+// Truly suffix-anchored: finds closing } first, then tests the bounded content
+// against known suffixes from the right. Handles dots in tag names (e.g., v0.2.1).
+func resolveTagTemplates(s string, tags map[string]TagInfo) string {
+	if tags == nil {
+		return s
+	}
+
+	const prefix = "{docker.tag."
+
+	var out strings.Builder
+	for {
+		idx := strings.Index(s, prefix)
+		if idx == -1 {
+			out.WriteString(s)
+			break
+		}
+		out.WriteString(s[:idx])
+		rest := s[idx+len(prefix):]
+
+		// Find the closing brace — bounds this single placeholder
+		closeIdx := strings.Index(rest, "}")
+		if closeIdx == -1 {
+			// Unclosed placeholder — write literally and stop
+			out.WriteString(prefix)
+			out.WriteString(rest)
+			break
+		}
+
+		// inner is everything between "{docker.tag." and "}" (inclusive of "}")
+		inner := rest[:closeIdx+1]
+
+		matched := false
+		for _, sf := range knownTagSuffixes {
+			if strings.HasSuffix(inner, sf.pattern) {
+				tagName := inner[:len(inner)-len(sf.pattern)]
+				if tagName == "" {
+					continue
+				}
+				ti, ok := tags[tagName]
+				if ok {
+					out.WriteString(sf.format(ti))
+				}
+				// tag not found → empty string (no output)
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			// Known prefix but unrecognized suffix — write literally
+			out.WriteString(prefix)
+			out.WriteString(inner)
+		}
+		s = rest[closeIdx+1:]
+	}
+	return out.String()
+}
+
+// ExtractDockerTagNames scans strings for {docker.tag.TAGNAME.FIELD} patterns
+// and returns deduplicated tag names. Uses the same suffix-anchored parsing
+// as resolveTagTemplates.
+func ExtractDockerTagNames(values []string) []string {
+	const prefix = "{docker.tag."
+
+	seen := make(map[string]bool)
+	for _, v := range values {
+		s := v
+		for {
+			idx := strings.Index(s, prefix)
+			if idx == -1 {
+				break
+			}
+			rest := s[idx+len(prefix):]
+
+			closeIdx := strings.Index(rest, "}")
+			if closeIdx == -1 {
+				break
+			}
+
+			inner := rest[:closeIdx+1]
+			for _, sf := range knownTagSuffixes {
+				if strings.HasSuffix(inner, sf.pattern) {
+					tagName := inner[:len(inner)-len(sf.pattern)]
+					if tagName != "" {
+						seen[tagName] = true
+					}
+					break
+				}
+			}
+			s = rest[closeIdx+1:]
+		}
+	}
+
+	tags := make([]string, 0, len(seen))
+	for tag := range seen {
+		tags = append(tags, tag)
+	}
+	return tags
 }
 
 // formatCount formats a number for human display: 1247 → "1.2k", 1234567 → "1.2M".

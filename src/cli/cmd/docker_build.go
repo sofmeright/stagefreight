@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -1337,21 +1338,47 @@ func runBadgeSection(w io.Writer, color bool, rootDir string) (string, time.Dura
 	// Detect version for template resolution
 	vi, _ := build.DetectVersion(rootDir)
 
-	// Lazy Docker Hub info — only fetch if any badge value uses {docker.*}
+	// Pass 1: resolve version templates for all badges, collect resolved values
+	specs := make([]config.BadgeSpec, len(items))
+	resolvedValues := make([]string, len(items))
+	for i, item := range items {
+		specs[i] = item.ToBadgeSpec()
+		value := specs[i].Value
+		if vi != nil && value != "" {
+			value = gitver.ResolveTemplateWithDirAndVars(value, vi, rootDir, cfg.Vars)
+		}
+		resolvedValues[i] = value
+	}
+
+	// Scan resolved values for {docker.tag.*} patterns to discover tag names
+	tagNames := gitver.ExtractDockerTagNames(resolvedValues)
+
+	// Lazy Docker Hub info — fetch repo-level + per-tag info if needed
 	var dockerInfo *gitver.DockerHubInfo
-	for _, item := range items {
-		if strings.Contains(item.Value, "{docker.") {
-			ns, repo := dockerHubFromConfig()
-			if ns != "" && repo != "" {
-				dockerInfo, _ = gitver.FetchDockerHubInfo(ns, repo)
+	needsDocker := len(tagNames) > 0
+	if !needsDocker {
+		for _, v := range resolvedValues {
+			if strings.Contains(v, "{docker.") {
+				needsDocker = true
+				break
 			}
-			break
+		}
+	}
+	if needsDocker {
+		ns, repo := dockerHubFromConfig()
+		if ns != "" && repo != "" {
+			dockerInfo, _ = gitver.FetchDockerHubInfo(ns, repo)
+			if dockerInfo != nil && len(tagNames) > 0 {
+				client := &http.Client{Timeout: 10 * time.Second}
+				dockerInfo.Tags = gitver.FetchTagInfo(client, ns, repo, tagNames)
+			}
 		}
 	}
 
+	// Pass 2: resolve docker templates and generate SVGs
 	var generated int
-	for _, item := range items {
-		spec := item.ToBadgeSpec()
+	for i := range items {
+		spec := specs[i]
 
 		// Per-item engine if font is overridden
 		itemEng := eng
@@ -1363,12 +1390,12 @@ func runBadgeSection(w io.Writer, color bool, rootDir string) (string, time.Dura
 			itemEng = override
 		}
 
-		// Resolve value templates
-		value := spec.Value
-		if vi != nil && value != "" {
-			value = gitver.ResolveTemplateWithDirAndVars(value, vi, rootDir, cfg.Vars)
+		value := gitver.ResolveDockerTemplates(resolvedValues[i], dockerInfo)
+
+		// Guard against empty values producing broken badges
+		if value == "" {
+			value = "n/a"
 		}
-		value = gitver.ResolveDockerTemplates(value, dockerInfo)
 
 		// Resolve color
 		badgeColor := spec.Color

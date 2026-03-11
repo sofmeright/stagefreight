@@ -243,6 +243,9 @@ func buildModulesV2(items []config.NarratorItem, linkBase, rawBase string, vi *g
 
 		case "badge":
 			link := gitver.ResolveVars(item.Link, cfg.Vars)
+			if vi != nil {
+				link = gitver.ResolveTemplateWithDirAndVars(link, vi, rootDir, cfg.Vars)
+			}
 			resolved := item
 			resolved.Link = link
 			mod := resolveBadgeItemV2(resolved, linkBase, rawBase)
