@@ -613,6 +613,118 @@ func extractGoVersionFromTag(tag string) string {
 	return ver
 }
 
+// detectGoDirectiveDrift scans all resolved dependencies for golang builder images
+// whose version is strictly newer than the corresponding go.mod directive. Returns
+// sync targets for modules where the Dockerfile's golang version exceeds go.mod.
+func detectGoDirectiveDrift(repoRoot string, allDeps []freshness.Dependency) goDirectiveSyncResult {
+	byModuleDir := make(map[string]goDirectiveSyncTarget)
+	conflicted := make(map[string]bool)
+
+	for _, dep := range allDeps {
+		if dep.Ecosystem != freshness.EcosystemDockerImage || !isGolangImage(dep.Name) {
+			continue
+		}
+
+		goVer := extractGoVersionFromTag(dep.Current)
+		if goVer == "" {
+			continue
+		}
+
+		moduleDir := findNearestGoMod(repoRoot, filepath.Dir(dep.File))
+		if moduleDir == "" {
+			continue
+		}
+
+		if conflicted[moduleDir] {
+			continue
+		}
+
+		// Only sync when builder is strictly newer than go.mod
+		modFile := filepath.Join(repoRoot, moduleDir, "go.mod")
+		cur := parseGoDirectiveFromFile(modFile)
+		if cur == "" {
+			continue
+		}
+		delta := freshness.CompareDependencyVersions(cur, goVer, freshness.EcosystemGoMod)
+		if delta.Major <= 0 && delta.Minor <= 0 && delta.Patch <= 0 {
+			continue // go.mod is equal or newer — no drift
+		}
+
+		if existing, ok := byModuleDir[moduleDir]; ok {
+			if existing.GoVersion != goVer {
+				delete(byModuleDir, moduleDir)
+				conflicted[moduleDir] = true
+				continue
+			}
+		}
+
+		byModuleDir[moduleDir] = goDirectiveSyncTarget{
+			ModuleDir: moduleDir,
+			GoVersion: goVer,
+			Source:    dep.File,
+		}
+	}
+
+	targets := make([]goDirectiveSyncTarget, 0, len(byModuleDir))
+	for _, t := range byModuleDir {
+		targets = append(targets, t)
+	}
+	sort.Slice(targets, func(i, j int) bool {
+		return targets[i].ModuleDir < targets[j].ModuleDir
+	})
+
+	var conflicts []goDirectiveConflict
+	for dir := range conflicted {
+		conflicts = append(conflicts, goDirectiveConflict{ModuleDir: dir})
+	}
+	sort.Slice(conflicts, func(i, j int) bool {
+		return conflicts[i].ModuleDir < conflicts[j].ModuleDir
+	})
+
+	return goDirectiveSyncResult{Targets: targets, Conflicted: conflicts}
+}
+
+// mergeGoDirectiveSyncResults combines two sync results, deduplicating by module dir.
+// If both sources have an entry for the same module (target or conflict), the first (a) wins.
+func mergeGoDirectiveSyncResults(a, b goDirectiveSyncResult) goDirectiveSyncResult {
+	if len(b.Targets) == 0 && len(b.Conflicted) == 0 {
+		return a
+	}
+	if len(a.Targets) == 0 && len(a.Conflicted) == 0 {
+		return b
+	}
+
+	seen := make(map[string]bool)
+	for _, t := range a.Targets {
+		seen[t.ModuleDir] = true
+	}
+	for _, c := range a.Conflicted {
+		seen[c.ModuleDir] = true
+	}
+
+	for _, t := range b.Targets {
+		if !seen[t.ModuleDir] {
+			a.Targets = append(a.Targets, t)
+			seen[t.ModuleDir] = true
+		}
+	}
+	for _, c := range b.Conflicted {
+		if !seen[c.ModuleDir] {
+			a.Conflicted = append(a.Conflicted, c)
+			seen[c.ModuleDir] = true
+		}
+	}
+
+	sort.Slice(a.Targets, func(i, j int) bool {
+		return a.Targets[i].ModuleDir < a.Targets[j].ModuleDir
+	})
+	sort.Slice(a.Conflicted, func(i, j int) bool {
+		return a.Conflicted[i].ModuleDir < a.Conflicted[j].ModuleDir
+	})
+
+	return a
+}
+
 // detectReplaceDirectives parses go.mod and returns a set of replaced module paths.
 func detectReplaceDirectives(moduleDir string) (map[string]bool, error) {
 	gomod := filepath.Join(moduleDir, "go.mod")

@@ -83,13 +83,22 @@ func Update(ctx context.Context, cfg UpdateConfig, deps []freshness.Dependency) 
 		result.Skipped = append(result.Skipped, dkSkipped...)
 	}
 
-	// 5b. Sync go directive to match applied golang builder updates
+	// 5b. Sync go directives to match golang builder versions.
+	// Two sources of sync targets, merged and deduped:
+	//   - Applied builder updates (Dockerfile golang image was bumped this run)
+	//   - Existing drift (Dockerfile already up-to-date but go.mod lags behind)
+	var syncResolved goDirectiveSyncResult
 	if hasAppliedGolangBuilderUpdate(result.Applied) {
-		resolved := collectGoDirectiveSyncTargets(repoRoot, result.Applied)
-		if err := syncGoDirectivesFromResolved(ctx, repoRoot, result, resolved); err != nil {
+		syncResolved = collectGoDirectiveSyncTargets(repoRoot, result.Applied)
+	}
+	driftResolved := detectGoDirectiveDrift(repoRoot, deps)
+	syncResolved = mergeGoDirectiveSyncResults(syncResolved, driftResolved)
+
+	if len(syncResolved.Targets) > 0 || len(syncResolved.Conflicted) > 0 {
+		if err := syncGoDirectivesFromResolved(ctx, repoRoot, result, syncResolved); err != nil {
 			return result, fmt.Errorf("syncing go directives: %w", err)
 		}
-		result.Toolchains = collectToolchainDepsFromResolved(resolved, result.Applied)
+		result.Toolchains = collectToolchainDepsFromResolved(syncResolved, result.Applied)
 	}
 
 	// 6. Verify — only run on Go module dirs that were actually updated
