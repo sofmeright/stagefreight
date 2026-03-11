@@ -100,20 +100,6 @@ narrator:
   - file: "README.md"
     link_base: "https://github.com/{var:github_org}/{var:repo}/blob/main"
     items:
-      - id: badge.release
-        kind: badge
-        placement:
-          between: ["<!-- sf:badges:start -->", "<!-- sf:badges:end -->"]
-          mode: replace
-          inline: true
-        text: release
-        value: "v{base}"
-        color: "#74ecbe"
-        font: dejavu-sans
-        font_size: 11
-        output: ".stagefreight/badges/release.svg"
-        link: "https://github.com/{var:github_org}/{var:repo}/releases"
-
       - id: badge.build
         kind: badge
         placement:
@@ -139,6 +125,20 @@ narrator:
         font: monofur
         output: ".stagefreight/badges/license.svg"
         link: LICENSE
+
+      - id: badge.release
+        kind: badge
+        placement:
+          between: ["<!-- sf:badges:start -->", "<!-- sf:badges:end -->"]
+          mode: replace
+          inline: true
+        text: release
+        value: "v{base}"
+        color: "#74ecbe"
+        font: dejavu-sans
+        font_size: 11
+        output: ".stagefreight/badges/release.svg"
+        link: "https://github.com/{var:github_org}/{var:repo}/releases"
 
       - id: badge.updated
         kind: badge
