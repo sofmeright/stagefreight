@@ -4,17 +4,16 @@
 
 # StageFreight
 
-<!-- sf:project:start -->
-[![badge/GitHub-source-181717?logo=github](https://img.shields.io/badge/GitHub-source-181717?logo=github)](https://github.com/prplanit/stagefreight) [![badge/GitLab-source-FC6D26?logo=gitlab](https://img.shields.io/badge/GitLab-source-FC6D26?logo=gitlab)](https://gitlab.prplanit.com/precisionplanit/stagefreight) [![Go Report Card](https://goreportcard.com/badge/github.com/prplanit/stagefreight)](https://goreportcard.com/report/github.com/prplanit/stagefreight) [![Go Reference](https://pkg.go.dev/badge/github.com/prplanit/stagefreight.svg)](https://pkg.go.dev/github.com/prplanit/stagefreight) [![Last Commit](https://img.shields.io/github/last-commit/prplanit/stagefreight)](https://github.com/prplanit/stagefreight/commits) [![Open Issues](https://img.shields.io/github/issues/prplanit/stagefreight)](https://github.com/prplanit/stagefreight/issues) ![github/issues-pr/prplanit/stagefreight](https://img.shields.io/github/issues-pr/prplanit/stagefreight) [![Contributors](https://img.shields.io/github/contributors/prplanit/stagefreight)](https://github.com/prplanit/stagefreight/graphs/contributors)
-<!-- sf:project:end -->
-<!-- sf:badges:start -->
-[![build](https://raw.githubusercontent.com/prplanit/stagefreight/main/.stagefreight/badges/build.svg)](https://gitlab.prplanit.com/precisionplanit/stagefreight/-/pipelines) [![license](https://raw.githubusercontent.com/prplanit/stagefreight/main/.stagefreight/badges/license.svg)](https://github.com/prplanit/stagefreight/blob/main/LICENSE) [![release](https://raw.githubusercontent.com/prplanit/stagefreight/main/.stagefreight/badges/release.svg)](https://github.com/prplanit/stagefreight/releases) ![updated](https://raw.githubusercontent.com/prplanit/stagefreight/main/.stagefreight/badges/updated.svg)
-<!-- sf:badges:end -->
-
 > *Hello World's a Stage*
 
 A declarative CI/CD automation CLI that detects, builds, scans, and releases container images across forges and registries — from a single manifest. StageFreight is open-source, self-building, and replaces fragile shell-script CI pipelines with a single Go binary driven by one [`.stagefreight.yml`](.stagefreight.yml) file.
 
+<!-- sf:project:start -->
+[![badge/GitHub-source-181717?logo=github](https://img.shields.io/badge/GitHub-source-181717?logo=github)](https://github.com/prplanit/stagefreight) [![badge/GitLab-source-FC6D26?logo=gitlab](https://img.shields.io/badge/GitLab-source-FC6D26?logo=gitlab)](https://gitlab.prplanit.com/precisionplanit/stagefreight) [![Go Report Card](https://goreportcard.com/badge/github.com/prplanit/stagefreight)](https://goreportcard.com/report/github.com/prplanit/stagefreight) [![Go Reference](https://pkg.go.dev/badge/github.com/prplanit/stagefreight.svg)](https://pkg.go.dev/github.com/prplanit/stagefreight) [![Last Commit](https://img.shields.io/github/last-commit/prplanit/stagefreight)](https://github.com/prplanit/stagefreight/commits) [![Open Issues](https://img.shields.io/github/issues/prplanit/stagefreight)](https://github.com/prplanit/stagefreight/issues) ![github/issues-pr/prplanit/stagefreight](https://img.shields.io/github/issues-pr/prplanit/stagefreight) [![Contributors](https://img.shields.io/github/contributors/prplanit/stagefreight)](https://github.com/prplanit/stagefreight/graphs/contributors)
+<!-- sf:project:end -->
+<!-- sf:badges:start -->
+[![build](https://raw.githubusercontent.com/prplanit/stagefreight/main/.stagefreight/badges/build.svg)](https://gitlab.prplanit.com/precisionplanit/stagefreight/-/pipelines) [![license](https://raw.githubusercontent.com/prplanit/stagefreight/main/.stagefreight/badges/license.svg)](https://github.com/prplanit/stagefreight/blob/main/LICENSE) [![release](https://raw.githubusercontent.com/prplanit/stagefreight/main/.stagefreight/badges/release.svg)](https://github.com/prplanit/stagefreight/releases) ![updated](https://raw.githubusercontent.com/prplanit/stagefreight/main/.stagefreight/badges/updated.svg) [![donate](https://img.shields.io/badge/donate-FF5E5B?logo=ko-fi&logoColor=white)](https://ko-fi.com/T6T41IT163) [![sponsor](https://img.shields.io/badge/sponsor-EA4AAA?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/prplanit)
+<!-- sf:badges:end -->
 <!-- sf:image:start -->
 [![Docker](https://img.shields.io/badge/Docker-prplanit%2Fstagefreight-2496ED?logo=docker&logoColor=white)](https://hub.docker.com/r/prplanit/stagefreight) [![pulls](https://raw.githubusercontent.com/prplanit/stagefreight/main/.stagefreight/badges/pulls.svg)](https://hub.docker.com/r/prplanit/stagefreight)
 

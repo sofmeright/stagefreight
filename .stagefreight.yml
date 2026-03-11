@@ -153,6 +153,24 @@ narrator:
         font_size: 11
         output: ".stagefreight/badges/updated.svg"
 
+      - id: shield.donate
+        kind: shield
+        placement:
+          between: ["<!-- sf:badges:start -->", "<!-- sf:badges:end -->"]
+          mode: replace
+          inline: true
+        shield: "badge/donate-FF5E5B?logo=ko-fi&logoColor=white"
+        link: "https://ko-fi.com/T6T41IT163"
+
+      - id: shield.sponsor
+        kind: shield
+        placement:
+          between: ["<!-- sf:badges:start -->", "<!-- sf:badges:end -->"]
+          mode: replace
+          inline: true
+        shield: "badge/sponsor-EA4AAA?logo=githubsponsors&logoColor=white"
+        link: "https://github.com/sponsors/{var:github_org}"
+
       # ── Project section (repo health & sources) ─────────────────
       - id: project.github
         kind: shield
