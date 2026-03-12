@@ -93,6 +93,22 @@ func ResolveVars(s string, vars map[string]string) string {
 	return resolveVarsWithSeen(s, vars, nil)
 }
 
+// ResolveVarsShields resolves {var:*} templates with shields.io escaping.
+// Hyphens and underscores in resolved values are doubled (- -> --, _ -> __)
+// for shields.io static badge path escaping.
+func ResolveVarsShields(s string, vars map[string]string) string {
+	if len(vars) == 0 || !strings.Contains(s, "{var:") {
+		return s
+	}
+	escaped := make(map[string]string, len(vars))
+	for k, v := range vars {
+		v = strings.ReplaceAll(v, "-", "--")
+		v = strings.ReplaceAll(v, "_", "__")
+		escaped[k] = v
+	}
+	return resolveVarsWithSeen(s, escaped, nil)
+}
+
 func resolveVarsWithSeen(s string, vars map[string]string, seen map[string]bool) string {
 	for {
 		start := strings.Index(s, "{var:")

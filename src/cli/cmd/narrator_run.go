@@ -254,7 +254,7 @@ func buildModulesV2(items []config.NarratorItem, linkBase, rawBase string, vi *g
 			}
 
 		case "shield":
-			shieldPath := gitver.ResolveVars(item.Shield, cfg.Vars)
+			shieldPath := gitver.ResolveVarsShields(item.Shield, cfg.Vars)
 			link := gitver.ResolveVars(item.Link, cfg.Vars)
 			label := item.Text
 			if label == "" {
