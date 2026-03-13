@@ -82,7 +82,6 @@ func depsRunner(ctx context.Context, appCfg *config.Config, ciCtx *ci.CIContext,
 // runDependencyUpdateLogic runs the dependency update pipeline (resolve → filter → apply → verify → artifacts).
 // Extracted from the Cobra command for reuse by CI runners.
 func runDependencyUpdateLogic(ctx context.Context, appCfg *config.Config, rootDir string, isVerbose bool) (*dependency.UpdateResult, error) {
-	color := output.UseColor()
 	w := os.Stdout
 
 	// Load freshness options from config
