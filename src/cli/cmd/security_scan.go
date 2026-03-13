@@ -119,7 +119,6 @@ func resolveTarget(explicitImage string, positionalArgs []string) (security.Scan
 	if selected == nil {
 		selected = &manifest.Published[0]
 		reason = fmt.Sprintf("first candidate by manifest order (%d candidates, all bare tags)", len(candidates))
-		fmt.Fprintf(os.Stderr, "security: all candidates are tag references — no digest available\n")
 	}
 
 	// Build the execution ref — if we have a digest, use digest ref for scanning
@@ -143,8 +142,12 @@ func resolveTarget(explicitImage string, positionalArgs []string) (security.Scan
 		}
 	}
 
-	// Log candidate selection
-	fmt.Fprintf(os.Stderr, "security: auto-resolved scan target from publish manifest\n")
+	// Log candidate selection with resolution strength
+	if selected.Digest != "" {
+		fmt.Fprintf(os.Stderr, "security: resolved immutable scan target from publish manifest\n")
+	} else {
+		fmt.Fprintf(os.Stderr, "security: falling back to mutable tag target from publish manifest\n")
+	}
 	for _, c := range candidates {
 		marker := "   "
 		if c.Ref == selected.Ref {

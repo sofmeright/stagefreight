@@ -314,6 +314,11 @@ func (g *GitLabForge) CreateMR(ctx context.Context, opts MROptions) (*MR, error)
 	}, nil
 }
 
+func (g *GitLabForge) CancelPipeline(ctx context.Context, pipelineID string) error {
+	cancelURL := g.apiURL(fmt.Sprintf("/pipelines/%s/cancel", pipelineID))
+	return g.doJSON(ctx, "POST", cancelURL, nil, nil)
+}
+
 func (g *GitLabForge) ListReleases(ctx context.Context) ([]ReleaseInfo, error) {
 	var all []ReleaseInfo
 	page := 1

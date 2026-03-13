@@ -18,6 +18,7 @@ type CIContext struct {
 	DefaultBranch string // repo default branch name
 	RepoURL       string // repository URL
 	Workspace     string // working directory
+	PipelineID    string // provider pipeline/run ID (for cancel API)
 }
 
 // IsCI returns true when running in a CI environment (SF_CI_PROVIDER is set).
@@ -47,6 +48,7 @@ func ResolveContext() *CIContext {
 		DefaultBranch: os.Getenv("SF_CI_DEFAULT_BRANCH"),
 		RepoURL:       os.Getenv("SF_CI_REPO_URL"),
 		Workspace:     os.Getenv("SF_CI_WORKSPACE"),
+		PipelineID:    os.Getenv("SF_CI_PIPELINE_ID"),
 	}
 
 	// Local fallbacks via git inspection

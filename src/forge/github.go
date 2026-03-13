@@ -346,6 +346,11 @@ func (g *GitHubForge) CreateMR(ctx context.Context, opts MROptions) (*MR, error)
 	}, nil
 }
 
+func (g *GitHubForge) CancelPipeline(ctx context.Context, pipelineID string) error {
+	// GitHub Actions handles cancellation natively via auto-cancel and concurrency groups.
+	return nil
+}
+
 func (g *GitHubForge) ListReleases(ctx context.Context) ([]ReleaseInfo, error) {
 	var all []ReleaseInfo
 	page := 1

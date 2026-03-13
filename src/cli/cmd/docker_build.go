@@ -426,6 +426,7 @@ func runDockerBuild(cmd *cobra.Command, args []string) error {
 					Host:              host,
 					Path:              reg.Path,
 					Tag:               tag,
+					Ref:               ref,
 					Provider:          provider,
 					CredentialRef:     reg.Credentials,
 					BuildInstance:     buildInst,
@@ -527,15 +528,30 @@ func runDockerBuild(cmd *cobra.Command, args []string) error {
 				for _, tag := range reg.Tags {
 					ref := host + "/" + reg.Path + ":" + tag
 
-					// Resolve digest after push with retry
+					// Resolve digest after push with retry and backoff
 					var capturedDigest string
-					for i := 0; i < 3; i++ {
+					for i := 0; i < 6; i++ {
 						d, rErr := build.ResolveDigest(ctx, ref)
 						if rErr == nil {
 							capturedDigest = d
 							break
 						}
-						time.Sleep(time.Second)
+						if i == 5 {
+							diag.Warn("could not resolve digest for %s via registry after push: %v", ref, rErr)
+						}
+						time.Sleep(time.Duration(i+1) * 500 * time.Millisecond)
+					}
+
+					// Fallback to local RepoDigests if registry resolution failed
+					if capturedDigest == "" {
+						if d, lErr := build.ResolveLocalDigest(ctx, ref); lErr == nil {
+							capturedDigest = d
+							diag.Info("publish: resolved digest via local RepoDigests fallback for %s", ref)
+						}
+					}
+
+					if capturedDigest == "" {
+						diag.Warn("published %s with no immutable digest — security will fall back to tag-based scanning", ref)
 					}
 
 					// Cross-client shadow write check
@@ -553,6 +569,7 @@ func runDockerBuild(cmd *cobra.Command, args []string) error {
 						Host:              host,
 						Path:              reg.Path,
 						Tag:               tag,
+						Ref:               ref,
 						Provider:          provider,
 						CredentialRef:     reg.Credentials,
 						BuildInstance:     buildInst,

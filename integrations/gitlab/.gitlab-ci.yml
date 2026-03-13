@@ -22,6 +22,7 @@ workflow:
   - export SF_CI_DEFAULT_BRANCH="${CI_DEFAULT_BRANCH}"
   - export SF_CI_REPO_URL="${CI_PROJECT_URL}"
   - export SF_CI_WORKSPACE="$PWD"
+  - export SF_CI_PIPELINE_ID="${CI_PIPELINE_ID}"
 
 default:
   image: docker.jcr.pcfae.com/prplanit/stagefreight:latest-dev

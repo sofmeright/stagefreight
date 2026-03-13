@@ -341,6 +341,11 @@ func (g *GiteaForge) CreateMR(ctx context.Context, opts MROptions) (*MR, error) 
 	}, nil
 }
 
+func (g *GiteaForge) CancelPipeline(ctx context.Context, pipelineID string) error {
+	// Gitea/Forgejo Actions doesn't expose a pipeline cancel API.
+	return nil
+}
+
 func (g *GiteaForge) ListReleases(ctx context.Context) ([]ReleaseInfo, error) {
 	var all []ReleaseInfo
 	page := 1

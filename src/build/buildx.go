@@ -330,6 +330,63 @@ func ResolveDigest(ctx context.Context, ref string) (string, error) {
 	return digest, nil
 }
 
+// ResolveLocalDigest extracts the pushed digest from a locally loaded image
+// via docker inspect RepoDigests. This is a fallback for when buildx imagetools
+// inspect can't reach the registry. Only returns a digest that matches the
+// requested ref's registry/path to prevent cross-ref confusion.
+func ResolveLocalDigest(ctx context.Context, ref string) (string, error) {
+	// Parse the ref to extract registry/path prefix for matching.
+	// ref format: "host/path:tag" or "host/path@sha256:..."
+	refPrefix := ref
+	if idx := strings.LastIndex(refPrefix, ":"); idx > 0 {
+		// Check it's a tag separator, not part of a port
+		slash := strings.LastIndex(refPrefix, "/")
+		if idx > slash {
+			refPrefix = refPrefix[:idx]
+		}
+	}
+	if idx := strings.Index(refPrefix, "@"); idx > 0 {
+		refPrefix = refPrefix[:idx]
+	}
+
+	out, err := exec.CommandContext(ctx, "docker", "inspect", ref,
+		"--format", "{{json .RepoDigests}}").Output()
+	if err != nil {
+		return "", fmt.Errorf("docker inspect %s: %w", ref, err)
+	}
+
+	var repoDigests []string
+	if err := json.Unmarshal(out, &repoDigests); err != nil {
+		return "", fmt.Errorf("parsing RepoDigests for %s: %w", ref, err)
+	}
+
+	// Normalize Docker Hub aliases for matching
+	normalizeDockerHub := func(s string) string {
+		for _, alias := range []string{"index.docker.io/", "registry-1.docker.io/"} {
+			if strings.HasPrefix(s, alias) {
+				return "docker.io/" + strings.TrimPrefix(s, alias)
+			}
+		}
+		return s
+	}
+
+	normalizedPrefix := normalizeDockerHub(refPrefix)
+
+	for _, rd := range repoDigests {
+		normalizedRD := normalizeDockerHub(rd)
+		// RepoDigest format: "registry/path@sha256:..."
+		if atIdx := strings.Index(normalizedRD, "@"); atIdx > 0 {
+			rdPrefix := normalizedRD[:atIdx]
+			digest := normalizedRD[atIdx+1:]
+			if rdPrefix == normalizedPrefix && strings.HasPrefix(digest, "sha256:") {
+				return digest, nil
+			}
+		}
+	}
+
+	return "", fmt.Errorf("no matching RepoDigest for %s in %v", ref, repoDigests)
+}
+
 // ParseMetadataDigest parses the digest from a buildx --metadata-file JSON output.
 func ParseMetadataDigest(metadataFile string) (string, error) {
 	data, err := os.ReadFile(metadataFile)

@@ -78,6 +78,11 @@ type Forge interface {
 	// CreateMR opens a merge/pull request.
 	CreateMR(ctx context.Context, opts MROptions) (*MR, error)
 
+	// CancelPipeline cancels the currently running pipeline (best-effort cleanup
+	// after deps pushes a repaired commit). Returns nil if the provider doesn't
+	// support pipeline cancellation.
+	CancelPipeline(ctx context.Context, pipelineID string) error
+
 	// ListReleases returns all releases, newest first.
 	ListReleases(ctx context.Context) ([]ReleaseInfo, error)
 

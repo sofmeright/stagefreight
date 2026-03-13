@@ -9,6 +9,7 @@ import (
 	"github.com/PrPlanIT/StageFreight/src/commit"
 	"github.com/PrPlanIT/StageFreight/src/config"
 	"github.com/PrPlanIT/StageFreight/src/dependency"
+	"github.com/PrPlanIT/StageFreight/src/forge"
 	"github.com/PrPlanIT/StageFreight/src/lint"
 	"github.com/PrPlanIT/StageFreight/src/lint/modules/freshness"
 	"github.com/PrPlanIT/StageFreight/src/output"
@@ -81,6 +82,14 @@ func depsRunner(ctx context.Context, appCfg *config.Config, ciCtx *ci.CIContext,
 			handoff := ci.EvaluateHandoff(ciCtx, appCfg.Dependency.CI.Handoff, commitResult.SHA)
 			if msg := ci.FormatHandoffMessage(handoff); msg != "" {
 				fmt.Println(msg)
+			}
+			if handoff.Decision == ci.HandoffRestart && ciCtx.PipelineID != "" {
+				fc, fcErr := newForgeClient(forge.Provider(ciCtx.Provider), ciCtx.RepoURL)
+				if fcErr == nil {
+					if cancelErr := fc.CancelPipeline(ctx, ciCtx.PipelineID); cancelErr != nil {
+						fmt.Fprintf(os.Stderr, "warning: pipeline cancel failed (freshness guards will handle): %v\n", cancelErr)
+					}
+				}
 			}
 			if handoff.Decision == ci.HandoffFail {
 				return fmt.Errorf("deps subsystem: dependency repair at handoff depth %d — policy requires clean revision after handoff", handoff.Depth)
