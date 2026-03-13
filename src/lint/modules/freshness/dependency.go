@@ -32,6 +32,7 @@ type VulnInfo struct {
 	Summary  string // short description
 	Severity string // "LOW", "MODERATE", "HIGH", "CRITICAL" (from OSV/CVSS)
 	FixedIn  string // version that fixes the vulnerability (if known)
+	Source   string // provenance: "osv" (default), "trivy", "grype", "trivy+grype"
 }
 
 // Ecosystem constants identify the origin of a dependency.

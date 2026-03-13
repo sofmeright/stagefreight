@@ -399,3 +399,7 @@ func (g *GitHubForge) DeleteRelease(ctx context.Context, tagName string) error {
 	}
 	return g.doJSON(ctx, "DELETE", g.apiURL(fmt.Sprintf("/releases/%d", rel.ID)), nil, nil)
 }
+
+func (g *GitHubForge) DownloadJobArtifact(ctx context.Context, ref, jobName, artifactPath string) ([]byte, error) {
+	return nil, ErrNotSupported
+}

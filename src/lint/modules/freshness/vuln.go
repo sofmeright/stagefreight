@@ -101,6 +101,7 @@ func (m *freshnessModule) correlateVulns(ctx context.Context, deps []Dependency)
 				Summary:  v.Summary,
 				Severity: extractHighestSeverity(v.Severity),
 				FixedIn:  extractFixedVersion(v.Affected, dep.Name, osvEco),
+				Source:   "osv",
 			}
 			dep.Vulnerabilities = append(dep.Vulnerabilities, vi)
 		}

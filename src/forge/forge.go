@@ -14,6 +14,9 @@ import (
 // ErrBranchMoved is returned when the target branch has moved since the expected SHA.
 var ErrBranchMoved = errors.New("target branch moved during commit")
 
+// ErrNotSupported is returned when a forge does not support a particular operation.
+var ErrNotSupported = errors.New("operation not supported by this forge")
+
 // CommitResult holds the result of a forge commit operation.
 type CommitResult struct {
 	SHA string
@@ -88,6 +91,12 @@ type Forge interface {
 
 	// DeleteRelease removes a release by its tag name.
 	DeleteRelease(ctx context.Context, tagName string) error
+
+	// DownloadJobArtifact fetches a single file from the latest successful job's
+	// artifacts for the given ref. Returns the raw file bytes.
+	// Returns os.ErrNotExist (or equivalent) if no artifacts found.
+	// Implementations may return ErrNotSupported if the forge doesn't support this.
+	DownloadJobArtifact(ctx context.Context, ref, jobName, artifactPath string) ([]byte, error)
 }
 
 // ReleaseOptions configures a new release.

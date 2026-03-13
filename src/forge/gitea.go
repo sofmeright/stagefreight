@@ -396,3 +396,7 @@ func (g *GiteaForge) DeleteRelease(ctx context.Context, tagName string) error {
 	}
 	return fmt.Errorf("release for tag %s not found", tagName)
 }
+
+func (g *GiteaForge) DownloadJobArtifact(ctx context.Context, ref, jobName, artifactPath string) ([]byte, error) {
+	return nil, ErrNotSupported
+}

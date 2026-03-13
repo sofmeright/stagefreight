@@ -7,22 +7,26 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
+	"sort"
 	"strings"
 
 	"github.com/PrPlanIT/StageFreight/src/diag"
+	"github.com/PrPlanIT/StageFreight/src/output"
 )
 
 // ScanConfig holds security scan configuration.
 type ScanConfig struct {
-	Enabled        bool   // run vulnerability scan
-	TrivyEnabled   bool   // run Trivy scanner
-	GrypeEnabled   bool   // run Grype scanner
-	SBOMEnabled    bool   // generate SBOM
-	FailOnCritical bool   // fail if critical vulns found
-	ImageRef       string // image reference or tarball path to scan
-	OutputDir      string // directory for scan artifacts
+	Enabled        bool      // run vulnerability scan
+	TrivyEnabled   bool      // run Trivy scanner
+	GrypeEnabled   bool      // run Grype scanner
+	SBOMEnabled    bool      // generate SBOM
+	FailOnCritical bool      // fail if critical vulns found
+	ImageRef       string    // image reference or tarball path to scan
+	OutputDir      string    // directory for scan artifacts
+	SectionWriter  io.Writer // writer for CI section markers (nil = os.Stderr)
 }
 
 // Vulnerability is a single parsed vulnerability from the scan.
@@ -33,6 +37,7 @@ type Vulnerability struct {
 	Installed   string // installed version
 	FixedIn     string // version that fixes the vuln
 	Description string // one-line description
+	Source      string // scanner provenance: "trivy" or "grype"
 }
 
 // RefStability classifies how stable/immutable a reference is.
@@ -130,8 +135,15 @@ func Scan(ctx context.Context, cfg ScanConfig) (*ScanResult, error) {
 	// Best-effort engine version (silent capture, no stdout/stderr connection).
 	result.EngineVersion = buildEngineVersion()
 
+	// Section writer for CI collapsed sections (default: os.Stderr).
+	sw := cfg.SectionWriter
+	if sw == nil {
+		sw = os.Stderr
+	}
+
 	// Run Trivy if enabled and available.
 	if cfg.TrivyEnabled {
+		output.SectionStartCollapsed(sw, "sf_trivy_raw", "Trivy scanner (raw)")
 		if _, lookErr := exec.LookPath("trivy"); lookErr == nil {
 			trivyVer := trivyVersion()
 			// Trivy JSON scan
@@ -161,10 +173,12 @@ func Scan(ctx context.Context, cfg ScanConfig) (*ScanResult, error) {
 			result.Partial = true
 			diag.Warn("trivy not found on PATH — skipping Trivy scan")
 		}
+		output.SectionEnd(sw, "sf_trivy_raw")
 	}
 
 	// Run Grype if enabled and available.
 	if cfg.GrypeEnabled {
+		output.SectionStartCollapsed(sw, "sf_grype_raw", "Grype scanner (raw)")
 		if _, lookErr := exec.LookPath("grype"); lookErr == nil {
 			grypeVer := grypeVersion()
 			grypeJSON := cfg.OutputDir + "/security-scan-grype.json"
@@ -187,6 +201,7 @@ func Scan(ctx context.Context, cfg ScanConfig) (*ScanResult, error) {
 			result.Partial = true
 			diag.Warn("grype not found on PATH — skipping Grype scan")
 		}
+		output.SectionEnd(sw, "sf_grype_raw")
 	}
 
 	// Deduplicate across scanners and recount.
@@ -207,17 +222,29 @@ func Scan(ctx context.Context, cfg ScanConfig) (*ScanResult, error) {
 
 	// Generate SBOM if enabled
 	if cfg.SBOMEnabled {
+		output.SectionStartCollapsed(sw, "sf_syft_raw", "Syft SBOM (raw)")
 		spdxPath := cfg.OutputDir + "/sbom.spdx.json"
-		if err := runSyft(ctx, cfg.ImageRef, "spdx-json", spdxPath); err != nil {
-			return nil, fmt.Errorf("syft spdx: %w", err)
+		spdxErr := runSyft(ctx, cfg.ImageRef, "spdx-json", spdxPath)
+		if spdxErr == nil {
+			result.Artifacts = append(result.Artifacts, spdxPath)
+			cdxPath := cfg.OutputDir + "/sbom.cyclonedx.json"
+			if err := runSyft(ctx, cfg.ImageRef, "cyclonedx-json", cdxPath); err != nil {
+				output.SectionEnd(sw, "sf_syft_raw")
+				return nil, fmt.Errorf("syft cyclonedx: %w", err)
+			}
+			result.Artifacts = append(result.Artifacts, cdxPath)
 		}
-		result.Artifacts = append(result.Artifacts, spdxPath)
+		output.SectionEnd(sw, "sf_syft_raw")
+		if spdxErr != nil {
+			return nil, fmt.Errorf("syft spdx: %w", spdxErr)
+		}
+	}
 
-		cdxPath := cfg.OutputDir + "/sbom.cyclonedx.json"
-		if err := runSyft(ctx, cfg.ImageRef, "cyclonedx-json", cdxPath); err != nil {
-			return nil, fmt.Errorf("syft cyclonedx: %w", err)
-		}
-		result.Artifacts = append(result.Artifacts, cdxPath)
+	// Write advisory bridge artifact for dependency enrichment.
+	if err := WriteAdvisories(cfg.OutputDir, cfg.ImageRef, result.Vulnerabilities); err != nil {
+		diag.Warn("could not write security advisories: %v", err)
+	} else {
+		result.Artifacts = append(result.Artifacts, cfg.OutputDir+"/advisories.json")
 	}
 
 	return result, nil
@@ -494,6 +521,7 @@ func parseTrivyVulnerabilities(jsonPath string, result *ScanResult) error {
 				Installed:   v.InstalledVersion,
 				FixedIn:     v.FixedVersion,
 				Description: desc,
+				Source:      "trivy",
 			})
 		}
 	}
@@ -570,6 +598,7 @@ func parseGrypeVulnerabilities(jsonPath string) ([]Vulnerability, error) {
 			Installed:   m.Artifact.Version,
 			FixedIn:     fixedIn,
 			Description: desc,
+			Source:      "grype",
 		})
 	}
 	return vulns, nil
@@ -595,12 +624,38 @@ func deduplicateVulnerabilities(vulns []Vulnerability) []Vulnerability {
 			if len(v.Description) > len(existing.Description) {
 				result[idx].Description = v.Description
 			}
+			// Merge source provenance with stable output.
+			if v.Source != "" {
+				result[idx].Source = mergeSources(existing.Source, v.Source)
+			}
 			continue
 		}
 		seen[k] = len(result)
 		result = append(result, v)
 	}
 	return result
+}
+
+// mergeSources combines source provenance strings with dedup and stable ordering.
+func mergeSources(a, b string) string {
+	seen := make(map[string]bool)
+	var sources []string
+	for _, s := range strings.Split(a, "+") {
+		s = strings.TrimSpace(s)
+		if s != "" && !seen[s] {
+			seen[s] = true
+			sources = append(sources, s)
+		}
+	}
+	for _, s := range strings.Split(b, "+") {
+		s = strings.TrimSpace(s)
+		if s != "" && !seen[s] {
+			seen[s] = true
+			sources = append(sources, s)
+		}
+	}
+	sort.Strings(sources)
+	return strings.Join(sources, "+")
 }
 
 // countSeverities tallies severity counts from a vulnerability slice.

@@ -16,9 +16,10 @@ import (
 
 // GitLabForge implements the Forge interface for GitLab instances.
 type GitLabForge struct {
-	BaseURL   string // e.g., "https://gitlab.prplanit.com"
-	Token     string // private token or job token
-	ProjectID string // numeric ID or "group/project" URL-encoded path
+	BaseURL    string // e.g., "https://gitlab.prplanit.com"
+	Token      string // private token or job token
+	ProjectID  string // numeric ID or "group/project" URL-encoded path
+	isJobToken bool   // true when Token came from CI_JOB_TOKEN
 }
 
 // NewGitLab creates a GitLab forge client.
@@ -26,8 +27,10 @@ type GitLabForge struct {
 // ProjectID is resolved from env: CI_PROJECT_ID, CI_PROJECT_PATH.
 func NewGitLab(baseURL string) *GitLabForge {
 	token := os.Getenv("GITLAB_TOKEN")
+	isJob := false
 	if token == "" {
 		token = os.Getenv("CI_JOB_TOKEN")
+		isJob = token != ""
 	}
 
 	projectID := os.Getenv("CI_PROJECT_ID")
@@ -36,9 +39,19 @@ func NewGitLab(baseURL string) *GitLabForge {
 	}
 
 	return &GitLabForge{
-		BaseURL:   baseURL,
-		Token:     token,
-		ProjectID: projectID,
+		BaseURL:    baseURL,
+		Token:      token,
+		ProjectID:  projectID,
+		isJobToken: isJob,
+	}
+}
+
+// setAuthHeader sets the appropriate auth header based on token type.
+func (g *GitLabForge) setAuthHeader(req *http.Request) {
+	if g.isJobToken {
+		req.Header.Set("JOB-TOKEN", g.Token)
+	} else {
+		req.Header.Set("PRIVATE-TOKEN", g.Token)
 	}
 }
 
@@ -62,7 +75,7 @@ func (g *GitLabForge) doJSON(ctx context.Context, method, url string, body inter
 	if err != nil {
 		return err
 	}
-	req.Header.Set("PRIVATE-TOKEN", g.Token)
+	g.setAuthHeader(req)
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
@@ -138,7 +151,7 @@ func (g *GitLabForge) UploadAsset(ctx context.Context, releaseID string, asset A
 	if err != nil {
 		return err
 	}
-	req.Header.Set("PRIVATE-TOKEN", g.Token)
+	g.setAuthHeader(req)
 	req.Header.Set("Content-Type", w.FormDataContentType())
 
 	resp, err := http.DefaultClient.Do(req)
@@ -277,7 +290,7 @@ func (g *GitLabForge) fileExists(ctx context.Context, path, branch string) bool 
 	if err != nil {
 		return false
 	}
-	req.Header.Set("PRIVATE-TOKEN", g.Token)
+	g.setAuthHeader(req)
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -363,4 +376,37 @@ func (g *GitLabForge) DeleteRelease(ctx context.Context, tagName string) error {
 func (g *GitLabForge) projectWebURL() string {
 	// CI_PROJECT_PATH is already "group/project", just join with base
 	return fmt.Sprintf("%s/%s", g.BaseURL, g.ProjectID)
+}
+
+func (g *GitLabForge) DownloadJobArtifact(ctx context.Context, ref, jobName, artifactPath string) ([]byte, error) {
+	rawURL := fmt.Sprintf("%s/api/v4/projects/%s/jobs/artifacts/%s/raw/%s?job=%s",
+		g.BaseURL,
+		url.PathEscape(g.ProjectID),
+		url.PathEscape(ref),
+		artifactPath, // already path-like, don't escape slashes
+		url.QueryEscape(jobName),
+	)
+
+	req, err := http.NewRequestWithContext(ctx, "GET", rawURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	g.setAuthHeader(req)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, os.ErrNotExist
+	}
+	if resp.StatusCode >= 400 {
+		return nil, &APIError{Method: "GET", URL: rawURL, StatusCode: resp.StatusCode, Body: string(body)}
+	}
+
+	return body, nil
 }

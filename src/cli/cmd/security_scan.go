@@ -210,14 +210,11 @@ func runSecurityScan(cmd *cobra.Command, args []string) error {
 
 	ctx := context.Background()
 
-	// Collapse raw scanner output in GitLab CI.
-	output.SectionStartCollapsed(os.Stderr, "sf_security_raw", "Security scanners (raw)")
+	scanCfg.SectionWriter = os.Stderr
 
 	start := time.Now()
 	result, err := security.Scan(ctx, scanCfg)
 	elapsed := time.Since(start)
-
-	output.SectionEnd(os.Stderr, "sf_security_raw")
 
 	if err != nil {
 		return fmt.Errorf("security scan: %w", err)

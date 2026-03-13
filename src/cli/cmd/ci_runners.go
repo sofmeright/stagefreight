@@ -57,6 +57,23 @@ func depsRunner(ctx context.Context, appCfg *config.Config, ciCtx *ci.CIContext,
 
 	rootDir := resolveWorkspace(ciCtx)
 
+	// Fetch security advisories from prior pipeline (cross-pipeline bridge).
+	if ciCtx.IsCI() {
+		ref := ciCtx.Branch
+		if ref == "" {
+			ref = ciCtx.DefaultBranch
+		}
+		fc, fcErr := newForgeClient(forge.Provider(ciCtx.Provider), ciCtx.RepoURL)
+		if fcErr == nil {
+			advisories, fetchErr := dependency.FetchAdvisories(ctx, fc, ref, rootDir)
+			if fetchErr != nil {
+				fmt.Fprintf(os.Stderr, "  deps: advisory fetch failed (continuing without): %v\n", fetchErr)
+			} else if len(advisories) > 0 {
+				fmt.Printf("  deps: fetched %d advisories from prior security scan\n", len(advisories))
+			}
+		}
+	}
+
 	// Run dependency update via the same code path as the CLI command
 	result, err := runDependencyUpdateLogic(ctx, appCfg, rootDir, opts.Verbose)
 	if err != nil {
@@ -134,6 +151,16 @@ func runDependencyUpdateLogic(ctx context.Context, appCfg *config.Config, rootDi
 		output.SectionEnd(w, "sf_deps_resolve")
 		return nil, fmt.Errorf("resolving dependencies: %w", err)
 	}
+
+	// Enrich dependencies with security scanner advisories from prior pipeline run.
+	advisories, advErr := dependency.LoadAdvisories(rootDir)
+	if advErr == nil && len(advisories) > 0 {
+		enriched := dependency.EnrichDependencies(deps, advisories)
+		if enriched > 0 {
+			fmt.Printf("  deps: enriched %d dependencies with security advisories\n", enriched)
+		}
+	}
+
 	output.SectionEnd(w, "sf_deps_resolve")
 
 	// Build update config
