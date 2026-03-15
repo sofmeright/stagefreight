@@ -12,6 +12,7 @@ import (
 	"github.com/PrPlanIT/StageFreight/src/component"
 	"github.com/PrPlanIT/StageFreight/src/config"
 	"github.com/PrPlanIT/StageFreight/src/gitver"
+	"github.com/PrPlanIT/StageFreight/src/manifest"
 	"github.com/PrPlanIT/StageFreight/src/narrator"
 	"github.com/PrPlanIT/StageFreight/src/output"
 	"github.com/PrPlanIT/StageFreight/src/props"
@@ -158,6 +159,45 @@ func processNarratorFile(fileCfg config.NarratorFile, rootDir string, vi *gitver
 	}
 
 	original := content
+
+	// Handle build-contents items with output_file (standalone file export).
+	// These write rendered content as standalone files, independent of section embedding.
+	for _, item := range fileCfg.Items {
+		if item.Kind != "build-contents" || item.OutputFile == "" {
+			continue
+		}
+
+		m := resolveBuildContentsManifest(item, rootDir)
+		if m == nil {
+			continue
+		}
+
+		rendered, err := manifest.RenderSection(m, item.Section, item.Renderer, item.Columns)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "narrator: build-contents output_file render: %v\n", err)
+			continue
+		}
+
+		outPath := item.OutputFile
+		if !filepath.IsAbs(outPath) {
+			outPath = filepath.Join(rootDir, outPath)
+		}
+
+		if nrDryRun {
+			fmt.Fprintf(os.Stdout, "# Would write to %s:\n%s\n", item.OutputFile, rendered)
+			continue
+		}
+
+		if err := os.MkdirAll(filepath.Dir(outPath), 0o755); err != nil {
+			return narratorFileResult{}, "", fmt.Errorf("narrator: creating directory for %s: %w", item.OutputFile, err)
+		}
+		if err := os.WriteFile(outPath, []byte(rendered+"\n"), 0o644); err != nil {
+			return narratorFileResult{}, "", fmt.Errorf("narrator: writing %s: %w", item.OutputFile, err)
+		}
+		if verbose {
+			fmt.Fprintf(os.Stderr, "  wrote %s\n", item.OutputFile)
+		}
+	}
 
 	// Group items by placement (items sharing the same markers are composed together).
 	groups := groupItemsByPlacement(fileCfg.Items)
@@ -306,6 +346,17 @@ func buildModulesV2(items []config.NarratorItem, linkBase, rawBase string, vi *g
 			}
 			modules = append(modules, narrator.IncludeModule{Content: strings.TrimSpace(string(data))})
 
+		case "build-contents":
+			m := resolveBuildContentsManifest(item, rootDir)
+			if m != nil {
+				modules = append(modules, narrator.BuildContentsModule{
+					Manifest: m,
+					Section:  item.Section,
+					Renderer: item.Renderer,
+					Columns:  item.Columns,
+				})
+			}
+
 		case "props":
 			def, ok := props.Get(item.Type)
 			if !ok {
@@ -356,6 +407,55 @@ func resolveBadgeItemV2(item config.NarratorItem, linkBase, rawBase string) narr
 		ImgURL: imgURL,
 		Link:   resolveLink(item.Link, linkBase),
 	}
+}
+
+// resolveBuildContentsManifest loads or generates a manifest for a build-contents item.
+func resolveBuildContentsManifest(item config.NarratorItem, rootDir string) *manifest.Manifest {
+	// If explicit source path is set, load from file
+	if item.Source != "" {
+		srcPath := item.Source
+		if !filepath.IsAbs(srcPath) {
+			srcPath = filepath.Join(rootDir, srcPath)
+		}
+		m, err := manifest.LoadManifest(srcPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "narrator: build-contents source %s: %v\n", item.Source, err)
+			return nil
+		}
+		return m
+	}
+
+	// Generate manifest from config (current scope).
+	// With multiple builds and no explicit source, this is ambiguous.
+	if len(cfg.Builds) > 1 {
+		fmt.Fprintf(os.Stderr, "narrator: build-contents: multiple builds configured — set source to explicit manifest path or use a single-build config\n")
+		return nil
+	}
+	buildID := manifest.FindDefaultBuildID(cfg)
+	if buildID == "" {
+		fmt.Fprintf(os.Stderr, "narrator: build-contents: no builds configured\n")
+		return nil
+	}
+
+	// Try loading existing manifest first
+	manifestPath := manifest.ResolveManifestPath(rootDir, cfg, buildID)
+	if m, err := manifest.LoadManifest(manifestPath); err == nil {
+		return m
+	}
+
+	// Generate on the fly
+	manifests, err := manifest.Generate(cfg, manifest.GenerateOptions{
+		RootDir: rootDir,
+		BuildID: buildID,
+		Mode:    "ephemeral",
+		DryRun:  true, // don't write to disk
+	})
+	if err != nil || len(manifests) == 0 {
+		fmt.Fprintf(os.Stderr, "narrator: build-contents manifest generation failed: %v\n", err)
+		return nil
+	}
+
+	return manifests[0]
 }
 
 // resolveLink resolves a relative link against a base URL.

@@ -207,6 +207,17 @@ func Validate(cfg *Config) (warnings []string, err error) {
 		}
 	}
 
+	// ── Manifest ────────────────────────────────────────────────────
+
+	if !validManifestModes[cfg.Manifest.Mode] {
+		errs = append(errs, fmt.Sprintf("manifest.mode: unknown mode %q (supported: ephemeral, workspace, commit, publish)", cfg.Manifest.Mode))
+	}
+	if cfg.Manifest.OutputDir != "" {
+		if pathErrs := validateOutputPath(cfg.Manifest.OutputDir, "manifest.output_dir"); len(pathErrs) > 0 {
+			errs = append(errs, pathErrs...)
+		}
+	}
+
 	// ── Security ─────────────────────────────────────────────────────────
 
 	if cfg.Security.OutputDir != "" {
@@ -368,8 +379,9 @@ func validateNarratorItem(item NarratorItem, path string) []string {
 		return errs
 	}
 
-	// Placement validation (break kind doesn't need placement)
-	if item.Kind != "break" {
+	// Placement validation (break kind doesn't need placement,
+	// build-contents can use output_file instead — validated in kind-specific block)
+	if item.Kind != "break" && item.Kind != "build-contents" {
 		if !hasPlacementSelector(item.Placement) {
 			errs = append(errs, fmt.Sprintf("%s: placement requires at least one selector (between, after, before, or heading)", path))
 		}
@@ -415,6 +427,26 @@ func validateNarratorItem(item NarratorItem, path string) []string {
 	case "props":
 		if item.Type == "" {
 			errs = append(errs, fmt.Sprintf("%s: kind props requires type (props resolver type ID)", path))
+		}
+
+	case "build-contents":
+		if item.Section == "" {
+			errs = append(errs, fmt.Sprintf("%s: kind build-contents requires section (dot-path into manifest)", path))
+		}
+		if item.Renderer == "" {
+			errs = append(errs, fmt.Sprintf("%s: kind build-contents requires renderer (table, list, or kv)", path))
+		} else if item.Renderer != "table" && item.Renderer != "list" && item.Renderer != "kv" {
+			errs = append(errs, fmt.Sprintf("%s: unknown renderer %q (supported: table, list, kv)", path, item.Renderer))
+		}
+		if item.OutputFile != "" {
+			if pathErrs := validateOutputPath(item.OutputFile, path+".output_file"); len(pathErrs) > 0 {
+				errs = append(errs, pathErrs...)
+			}
+		}
+		// build-contents can work with either placement (section embedding) or output_file, or both
+		// but needs at least one destination
+		if !hasPlacementSelector(item.Placement) && item.OutputFile == "" {
+			errs = append(errs, fmt.Sprintf("%s: kind build-contents requires placement selector or output_file (at least one destination)", path))
 		}
 	}
 

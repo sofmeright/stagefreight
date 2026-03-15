@@ -56,6 +56,9 @@ type Config struct {
 	// Docs holds configuration for the docs generation subsystem.
 	Docs DocsConfig `yaml:"docs"`
 
+	// Manifest holds configuration for the manifest subsystem.
+	Manifest ManifestConfig `yaml:"manifest"`
+
 	// Release holds configuration for the release subsystem.
 	Release ReleaseConfig `yaml:"release"`
 }
@@ -110,6 +113,7 @@ func defaults() *Config {
 		Commit:     DefaultCommitConfig(),
 		Dependency: DefaultDependencyConfig(),
 		Docs:       DefaultDocsConfig(),
+		Manifest:   DefaultManifestConfig(),
 		Release:    DefaultReleaseConfig(),
 	}
 }

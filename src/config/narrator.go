@@ -69,6 +69,28 @@ type NarratorItem struct {
 	// Path is the file path to include verbatim (kind: include).
 	Path string `yaml:"path,omitempty"`
 
+	// ── kind: build-contents ────────────────────────────────────────────
+
+	// Source is an optional path to a manifest JSON file (kind: build-contents).
+	// If omitted, uses the current scope manifest.
+	Source string `yaml:"source,omitempty"`
+
+	// Section is the dot-path into the manifest (kind: build-contents).
+	// e.g., "inventories.pip", "build.args", "security.sbom"
+	Section string `yaml:"section,omitempty"`
+
+	// Renderer is the rendering format (kind: build-contents).
+	// Supported: "table", "list", "kv".
+	Renderer string `yaml:"renderer,omitempty"`
+
+	// Columns selects which columns to render (kind: build-contents, renderer: table).
+	Columns []string `yaml:"columns,omitempty"`
+
+	// OutputFile is an optional standalone file output path (kind: build-contents).
+	// When set, the rendered content is written as a standalone file.
+	// Can be used alongside placement (section embedding) or alone.
+	OutputFile string `yaml:"output_file,omitempty"`
+
 	// ── kind: props ──────────────────────────────────────────────────────
 
 	// Type is the props resolver type ID (kind: props).
@@ -131,13 +153,14 @@ type NarratorPlacement struct {
 
 // validNarratorItemKinds enumerates all recognized narrator item kinds.
 var validNarratorItemKinds = map[string]bool{
-	"badge":     true,
-	"shield":    true,
-	"text":      true,
-	"component": true,
-	"break":     true,
-	"include":   true,
-	"props":     true,
+	"badge":          true,
+	"shield":         true,
+	"text":           true,
+	"component":      true,
+	"break":          true,
+	"include":        true,
+	"props":          true,
+	"build-contents": true,
 }
 
 // validPlacementModes enumerates all recognized placement modes.
