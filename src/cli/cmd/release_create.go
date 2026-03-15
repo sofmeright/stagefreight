@@ -887,6 +887,9 @@ func newForgeClient(provider forge.Provider, remoteURL string) (forge.Forge, err
 
 // newSyncForgeClientFromTarget creates a forge client for a remote release target.
 func newSyncForgeClientFromTarget(t config.TargetConfig) (forge.Forge, error) {
+	// Resolve {var:...} templates in target fields
+	t.ProjectID = gitver.ResolveVars(t.ProjectID, cfg.Vars)
+
 	switch t.Provider {
 	case "gitlab":
 		gl := forge.NewGitLab(t.URL)
