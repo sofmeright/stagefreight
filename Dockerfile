@@ -1,5 +1,5 @@
 # ---- Go build stage ----
-FROM docker.io/library/golang:1.26.1-alpine3.23 AS builder
+FROM docker.io/library/golang:1.26.1-alpine3.23.3 AS builder
 
 RUN apk add --no-cache git chafa
 
