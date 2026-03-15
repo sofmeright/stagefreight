@@ -32,6 +32,7 @@ Generated sections below are assembled from `docs/modules/config-reference.md` v
 - [`commit`](#config-commit)
 - [`dependency`](#config-dependency)
 - [`docs`](#config-docs)
+- [`manifest`](#config-manifest)
 - [`release`](#config-release)
 
 ---
@@ -253,6 +254,11 @@ Content composition for file targets. Composes badges, shields, text, includes, 
 | `content` | `items.content` | string | No | — | Raw text/markdown content. Supports template variables. `kind: text` only. |
 | `spec` | `items.spec` | string | No | — | Component spec file path. `kind: component` only. |
 | `path` | `items.path` | string | No | — | File path to include verbatim. `kind: include` only. |
+| `source` | `items.source` | string | No | — | string value |
+| `section` | `items.section` | string | No | — | string value |
+| `renderer` | `items.renderer` | string | No | — | string value |
+| `columns` | `items.columns` | []string | No | — | []string value |
+| `output_file` | `items.output_file` | string | No | — | string value |
 | `type` | `items.type` | string | No | — | string value |
 | `params` | `items.params` | map[string]string | No | — | map[string]string value |
 | `label` | `items.label` | string | No | — | string value |
@@ -424,6 +430,17 @@ commit:
 | `add` | `commit.add` | []string | Yes | — | []string value |
 | `push` | `commit.push` | bool | Yes | — | bool value |
 | `skip_ci` | `commit.skip_ci` | bool | Yes | — | bool value |
+
+---
+
+<a id="config-manifest" name="config-manifest"></a>
+### manifest
+
+| Name | YAML Key | Type | Required | Default | Description |
+|------|----------|------|----------|---------|-------------|
+| `enabled` | `enabled` | bool | Yes | — | bool value |
+| `mode` | `mode` | string | No | — | string value |
+| `output_dir` | `output_dir` | string | No | — | string value |
 
 ---
 
