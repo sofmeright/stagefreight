@@ -117,7 +117,7 @@ See [CLI Reference](docs/reference/CLI.md) for full flag documentation.
 
 #### Base Images
 <!-- sf:contents-base:start -->
-![alpine](https://img.shields.io/badge/alpine-3.23-0078D4?style=flat) ![alpine](https://img.shields.io/badge/alpine-3.23.3-0078D4?style=flat) ![golang](https://img.shields.io/badge/golang-1.26.1-0078D4?style=flat)
+![alpine](https://img.shields.io/badge/alpine-3.23.3-0078D4?style=flat) ![golang](https://img.shields.io/badge/golang-1.26.1-0078D4?style=flat)
 <!-- sf:contents-base:end -->
 
 #### Runtime Packages
