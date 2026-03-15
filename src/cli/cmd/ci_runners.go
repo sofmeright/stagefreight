@@ -144,6 +144,34 @@ func depsRunner(ctx context.Context, appCfg *config.Config, ciCtx *ci.CIContext,
 		return fmt.Errorf("deps subsystem: %w", err)
 	}
 
+	// Structured output — same format as `stagefreight dependency update`
+	w := os.Stdout
+	color := output.UseColor()
+	updateSec := output.NewSection(w, "Update", 0, color)
+
+	appliedDeps := toOutputApplied(result.Applied)
+	output.SectionApplied(updateSec, "Applied", appliedDeps, color)
+
+	skippedGroups := aggregateSkipped(result.Skipped)
+	output.SectionSkipped(updateSec, "Skipped", skippedGroups, color)
+
+	cves := collectCVEsFixed(result.Applied)
+	output.SectionCVEs(updateSec, cves, color)
+
+	if result.Verified {
+		status := "success"
+		if result.VerifyErr != nil {
+			status = "failed"
+		}
+		output.RowStatus(updateSec, "verify", "", status, color)
+	}
+
+	updateSec.Separator()
+	updateSec.Row("%-16s%d", "applied", len(result.Applied))
+	updateSec.Row("%-16s%d", "skipped", len(result.Skipped))
+	updateSec.Row("%-16s%d", "files changed", len(result.FilesChanged))
+	updateSec.Close()
+
 	// Auto-commit if configured and files changed
 	if appCfg.Dependency.Commit.Enabled && len(result.FilesChanged) > 0 {
 		commitResult, commitErr := autoCommitViaPlanner(ctx, appCfg, rootDir, commit.PlannerOptions{
