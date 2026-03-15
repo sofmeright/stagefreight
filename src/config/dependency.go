@@ -29,7 +29,7 @@ type DependencyConfig struct {
 // DependencyScopeConfig controls which dependency ecosystems are managed.
 type DependencyScopeConfig struct {
 	GoModules    bool `yaml:"go_modules"`
-	DockerfileEnv bool `yaml:"dockerfile_env"` // umbrella for docker-image + docker-tool
+	DockerfileEnv bool `yaml:"dockerfile_env"` // umbrella for docker-image + github-release
 }
 
 // DependencyCommitConfig controls auto-commit behavior for dependency updates.
@@ -75,7 +75,7 @@ func (s DependencyScopeConfig) ScopeToEcosystems() []string {
 		ecosystems = append(ecosystems, "gomod")
 	}
 	if s.DockerfileEnv {
-		ecosystems = append(ecosystems, "docker-image", "docker-tool")
+		ecosystems = append(ecosystems, "docker-image", "github-release")
 	}
 	return ecosystems
 }

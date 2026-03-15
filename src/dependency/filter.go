@@ -15,7 +15,7 @@ type SkippedDep struct {
 // autoUpdatableEcosystems defines which ecosystems can be automatically updated.
 var autoUpdatableEcosystems = map[string]bool{
 	freshness.EcosystemDockerImage: true,
-	freshness.EcosystemDockerTool:  true,
+	freshness.EcosystemGitHubRelease: true,
 	freshness.EcosystemGoMod:       true,
 	freshness.EcosystemCargo:       false,
 	freshness.EcosystemNpm:         false,

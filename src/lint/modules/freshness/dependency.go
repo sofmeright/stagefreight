@@ -38,7 +38,7 @@ type VulnInfo struct {
 // Ecosystem constants identify the origin of a dependency.
 const (
 	EcosystemDockerImage = "docker-image"
-	EcosystemDockerTool  = "docker-tool"
+	EcosystemGitHubRelease = "github-release"
 	EcosystemGoMod       = "gomod"
 	EcosystemCargo       = "cargo"
 	EcosystemNpm         = "npm"

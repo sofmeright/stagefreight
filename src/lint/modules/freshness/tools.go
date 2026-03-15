@@ -28,15 +28,15 @@ func (m *freshnessModule) checkTools(ctx context.Context, file lint.FileInfo, to
 		}
 
 		dep := Dependency{
-			Name:      tool.EnvName,
+			Name:      repo,
 			Current:   strings.TrimPrefix(tool.Version, "v"),
-			Ecosystem: EcosystemDockerTool,
+			Ecosystem: EcosystemGitHubRelease,
 			File:      file.Path,
 			Line:      tool.Line,
 		}
 
 		ep := m.cfg.Registries.GitHub
-		baseURL := m.cfg.registryURL(EcosystemDockerTool, "https://api.github.com")
+		baseURL := m.cfg.registryURL(EcosystemGitHubRelease, "https://api.github.com")
 		url := fmt.Sprintf("%s/repos/%s/%s/releases/latest", strings.TrimRight(baseURL, "/"), owner, repo)
 		dep.SourceURL = url
 
@@ -104,7 +104,7 @@ func matchToolToGitHub(envName string, urlMap map[string]bool) (string, string) 
 
 // checkToolsFromDockerfile is the entry point called from checkDockerfile.
 func (m *freshnessModule) checkToolsFromDockerfile(ctx context.Context, file lint.FileInfo, dfInfo *DockerFreshnessInfo) []Dependency {
-	if !m.cfg.sourceEnabled(EcosystemDockerTool) {
+	if !m.cfg.sourceEnabled(EcosystemGitHubRelease) {
 		return nil
 	}
 	return m.checkTools(ctx, file, dfInfo.PinnedTools)

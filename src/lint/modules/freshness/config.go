@@ -72,7 +72,7 @@ type RegistryEndpoint struct {
 // nil means "use default" (true for all).
 type SourceConfig struct {
 	DockerImages *bool `json:"docker_images"`
-	DockerTools  *bool `json:"docker_tools"`
+	GitHubReleases *bool `json:"github_releases"`
 	GoModules    *bool `json:"go_modules"`
 	RustCrates   *bool `json:"rust_crates"`
 	NpmPackages  *bool `json:"npm_packages"`
@@ -221,8 +221,8 @@ func (c *FreshnessConfig) sourceEnabled(ecosystem string) bool {
 	switch ecosystem {
 	case EcosystemDockerImage:
 		return check(c.Sources.DockerImages)
-	case EcosystemDockerTool:
-		return check(c.Sources.DockerTools)
+	case EcosystemGitHubRelease:
+		return check(c.Sources.GitHubReleases)
 	case EcosystemGoMod:
 		return check(c.Sources.GoModules)
 	case EcosystemCargo:
@@ -364,7 +364,7 @@ func (c *FreshnessConfig) registryEndpoint(ecosystem string) *RegistryEndpoint {
 	switch ecosystem {
 	case EcosystemDockerImage:
 		return c.Registries.Docker
-	case EcosystemDockerTool:
+	case EcosystemGitHubRelease:
 		return c.Registries.GitHub
 	case EcosystemGoMod:
 		return c.Registries.Go

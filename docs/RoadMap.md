@@ -4225,7 +4225,7 @@ Toggle dependency ecosystems. Omitted fields default to `true`.
 | Field | Type | Default |
 |-------|------|---------|
 | `docker_images` | bool | `true` |
-| `docker_tools` | bool | `true` |
+| `github_releases` | bool | `true` |
 | `go_modules` | bool | `true` |
 | `rust_crates` | bool | `true` |
 | `npm_packages` | bool | `true` |

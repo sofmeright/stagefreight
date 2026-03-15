@@ -19,7 +19,7 @@ var osvEcosystemMap = map[string]string{
 	EcosystemAlpineAPK:   "Alpine",
 	EcosystemDebianAPT:   "Debian",
 	EcosystemDockerImage: "", // no OSV ecosystem for container images
-	EcosystemDockerTool:  "", // tools checked via GitHub advisories, not OSV
+	EcosystemGitHubRelease: "", // tools checked via GitHub advisories, not OSV
 }
 
 // osvQueryRequest is the POST body for api.osv.dev/v1/query.

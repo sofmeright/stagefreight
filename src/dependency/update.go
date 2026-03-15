@@ -141,7 +141,7 @@ func groupByEcosystem(deps []freshness.Dependency) (gomod, docker []freshness.De
 		switch dep.Ecosystem {
 		case freshness.EcosystemGoMod:
 			gomod = append(gomod, dep)
-		case freshness.EcosystemDockerImage, freshness.EcosystemDockerTool:
+		case freshness.EcosystemDockerImage, freshness.EcosystemGitHubRelease:
 			docker = append(docker, dep)
 		}
 	}

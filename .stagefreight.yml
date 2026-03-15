@@ -408,7 +408,7 @@ lint:
         cache_ttl: 300
         sources:
           docker_images: true
-          docker_tools: true
+          github_releases: true
           go_modules: true
         vulnerability:
           enabled: true

@@ -293,8 +293,10 @@ func sourceShortName(dep freshness.Dependency) string {
 	switch dep.Ecosystem {
 	case freshness.EcosystemGoMod:
 		return "proxy.golang.org"
-	case freshness.EcosystemDockerImage, freshness.EcosystemDockerTool:
+	case freshness.EcosystemDockerImage:
 		return "dockerhub"
+	case freshness.EcosystemGitHubRelease:
+		return "github"
 	case freshness.EcosystemNpm:
 		return "npmjs"
 	case freshness.EcosystemPip:

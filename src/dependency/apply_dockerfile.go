@@ -122,7 +122,7 @@ func buildReplacement(dep freshness.Dependency, origLine string) (string, string
 	switch dep.Ecosystem {
 	case freshness.EcosystemDockerImage:
 		return buildFromReplacement(dep, origLine)
-	case freshness.EcosystemDockerTool:
+	case freshness.EcosystemGitHubRelease:
 		return buildEnvReplacement(dep, origLine)
 	default:
 		return origLine, "unsupported ecosystem for Dockerfile edit"

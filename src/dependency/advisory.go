@@ -169,8 +169,8 @@ func mapAdvisoryEcosystem(eco string) string {
 		return freshness.EcosystemCargo
 	case "docker-image":
 		return freshness.EcosystemDockerImage
-	case "docker-tool":
-		return freshness.EcosystemDockerTool
+	case "docker-tool", "github-release":
+		return freshness.EcosystemGitHubRelease
 	case "debian-apt":
 		return freshness.EcosystemDebianAPT
 	default:
