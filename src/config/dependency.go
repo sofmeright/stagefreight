@@ -32,13 +32,29 @@ type DependencyScopeConfig struct {
 	DockerfileEnv bool `yaml:"dockerfile_env"` // umbrella for docker-image + github-release
 }
 
+// DependencyCommitPromotion controls how dependency commits reach the target branch.
+type DependencyCommitPromotion string
+
+const (
+	PromotionDirect DependencyCommitPromotion = "direct" // push to current branch (existing behavior)
+	PromotionMR     DependencyCommitPromotion = "mr"     // push to unique bot branch, open merge request
+)
+
+// DependencyMRConfig controls merge request creation for promotion: mr.
+type DependencyMRConfig struct {
+	BranchPrefix string `yaml:"branch_prefix"` // default: "stagefreight/deps"
+	TargetBranch string `yaml:"target_branch"` // default: "" (CI default branch)
+}
+
 // DependencyCommitConfig controls auto-commit behavior for dependency updates.
 type DependencyCommitConfig struct {
-	Enabled bool   `yaml:"enabled"`
-	Type    string `yaml:"type"`
-	Message string `yaml:"message"`
-	Push    bool   `yaml:"push"`
-	SkipCI  bool   `yaml:"skip_ci"`
+	Enabled   bool                      `yaml:"enabled"`
+	Type      string                    `yaml:"type"`
+	Message   string                    `yaml:"message"`
+	Push      bool                      `yaml:"push"`
+	SkipCI    bool                      `yaml:"skip_ci"`
+	Promotion DependencyCommitPromotion `yaml:"promotion"` // "direct" or "mr"
+	MR        DependencyMRConfig        `yaml:"mr"`
 }
 
 // DefaultDependencyConfig returns sensible defaults for dependency management.
@@ -51,11 +67,15 @@ func DefaultDependencyConfig() DependencyConfig {
 			DockerfileEnv: true,
 		},
 		Commit: DependencyCommitConfig{
-			Enabled: true,
-			Type:    "chore",
-			Message: "update managed dependencies",
-			Push:    true,
-			SkipCI:  true,
+			Enabled:   true,
+			Type:      "chore",
+			Message:   "update managed dependencies",
+			Push:      true,
+			SkipCI:    true,
+			Promotion: PromotionDirect,
+			MR: DependencyMRConfig{
+				BranchPrefix: "stagefreight/deps",
+			},
 		},
 		CI: DependencyCIConfig{
 			Handoff: HandoffContinue,

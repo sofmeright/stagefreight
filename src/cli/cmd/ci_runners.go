@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sort"
+	"strings"
 
 	"github.com/PrPlanIT/StageFreight/src/build"
 	"github.com/PrPlanIT/StageFreight/src/ci"
@@ -174,20 +176,83 @@ func depsRunner(ctx context.Context, appCfg *config.Config, ciCtx *ci.CIContext,
 
 	// Auto-commit if configured and files changed
 	if appCfg.Dependency.Commit.Enabled && len(result.FilesChanged) > 0 {
-		commitResult, commitErr := autoCommitViaPlanner(ctx, appCfg, rootDir, commit.PlannerOptions{
+		// Compute bot branch for MR promotion mode
+		var botBranch string
+		if appCfg.Dependency.Commit.Promotion == config.PromotionMR && !ciCtx.IsCI() {
+			fmt.Fprintf(os.Stderr, "warning: promotion \"mr\" requires CI context; falling back to direct mode\n")
+		}
+		if appCfg.Dependency.Commit.Promotion == config.PromotionMR && ciCtx.IsCI() {
+			prefix := sanitizeBranchPrefix(appCfg.Dependency.Commit.MR.BranchPrefix)
+			if prefix == "" {
+				fmt.Fprintf(os.Stderr, "warning: invalid mr.branch_prefix %q; using default %q\n",
+					appCfg.Dependency.Commit.MR.BranchPrefix, "stagefreight/deps")
+				prefix = "stagefreight/deps"
+			}
+			shortSHA := ciCtx.SHA
+			if len(shortSHA) > 8 {
+				shortSHA = shortSHA[:8]
+			}
+			id := ciCtx.PipelineID
+			if id == "" {
+				id = shortSHA
+			}
+			botBranch = fmt.Sprintf("%s-%s-%s", prefix, id, shortSHA)
+		}
+
+		mode := "direct"
+		if botBranch != "" {
+			mode = "mr"
+		}
+		fmt.Printf("  deps: commit promotion mode: %s\n", mode)
+
+		plannerOpts := commit.PlannerOptions{
 			Type:    appCfg.Dependency.Commit.Type,
 			Scope:   "deps",
 			Message: appCfg.Dependency.Commit.Message,
 			Paths:   result.FilesChanged,
 			SkipCI:  boolPtr(appCfg.Dependency.Commit.SkipCI),
 			Push:    boolPtr(appCfg.Dependency.Commit.Push),
-		})
+		}
+		if botBranch != "" {
+			plannerOpts.Refspec = "HEAD:refs/heads/" + botBranch
+			fmt.Printf("  deps: pushing to bot branch %s\n", botBranch)
+		}
+
+		commitResult, commitErr := autoCommitViaPlanner(ctx, appCfg, rootDir, plannerOpts)
 		if commitErr != nil {
 			fmt.Fprintf(os.Stderr, "warning: dependency auto-commit failed: %v\n", commitErr)
 		}
 
-		// Evaluate handoff when a commit was actually created and pushed
-		if commitResult != nil && !commitResult.NoOp && commitResult.Pushed {
+		// MR mode: open merge request after successful push to bot branch
+		if commitResult != nil && !commitResult.NoOp && commitResult.Pushed && botBranch != "" {
+			target := appCfg.Dependency.Commit.MR.TargetBranch
+			if target == "" {
+				target = ciCtx.DefaultBranch
+			}
+			if target == "" {
+				target = ciCtx.Branch
+			}
+			fc, fcErr := newForgeClient(forge.Provider(ciCtx.Provider), ciCtx.RepoURL)
+			if fcErr != nil {
+				fmt.Fprintf(os.Stderr, "warning: forge client init failed, cannot create MR: %v\n", fcErr)
+			} else {
+				commitSubject := strings.SplitN(commitResult.Message, "\n", 2)[0]
+				mr, mrErr := fc.CreateMR(ctx, forge.MROptions{
+					Title:        commitSubject,
+					Description:  buildMRDescription(result),
+					SourceBranch: botBranch,
+					TargetBranch: target,
+				})
+				if mrErr != nil {
+					fmt.Fprintf(os.Stderr, "warning: merge request creation failed: %v\n", mrErr)
+				} else {
+					fmt.Printf("  deps: opened merge request %s\n", mr.URL)
+				}
+			}
+		}
+
+		// Evaluate handoff only in direct mode — MR mode uses merge requests instead
+		if botBranch == "" && commitResult != nil && !commitResult.NoOp && commitResult.Pushed {
 			handoff := ci.EvaluateHandoff(ciCtx, appCfg.Dependency.CI.Handoff, commitResult.SHA)
 			if msg := ci.FormatHandoffMessage(handoff); msg != "" {
 				fmt.Println(msg)
@@ -548,4 +613,190 @@ func autoCommitViaPlanner(ctx context.Context, appCfg *config.Config, rootDir st
 // boolPtr returns a pointer to a bool value.
 func boolPtr(b bool) *bool {
 	return &b
+}
+
+// ── MR description builder ───────────────────────────────────────────────────
+
+// buildMRDescription formats a rich markdown description for dependency update MRs.
+func buildMRDescription(result *dependency.UpdateResult) string {
+	if result == nil {
+		return "No dependency update result available.\n\n---\n\n> Automated by **StageFreight**\n"
+	}
+
+	var b strings.Builder
+
+	cves := collectCVEsFixed(result.Applied)
+	files := uniqueSortedStrings(result.FilesChanged)
+
+	// --- Summary header ---
+	b.WriteString("## Dependency Updates\n\n")
+
+	if len(result.Applied) == 0 {
+		b.WriteString("No dependency updates were applied.\n")
+	} else {
+		b.WriteString(fmt.Sprintf("**%s updated**  \n", pluralize(len(result.Applied), "dependency", "dependencies")))
+		if len(cves) > 0 {
+			b.WriteString(fmt.Sprintf("**%s fixed**  \n", pluralize(len(cves), "security advisory", "security advisories")))
+		}
+		if len(files) > 0 {
+			b.WriteString(fmt.Sprintf("**%s modified**  \n", pluralize(len(files), "file", "files")))
+		}
+	}
+
+	mrWriteDivider(&b)
+
+	// --- Updated Dependencies table ---
+	if len(result.Applied) > 0 {
+		mrSection(&b, "\U0001F4E6 Updated Dependencies")
+		b.WriteString("| Dependency | From | To | Type |\n")
+		b.WriteString("|---|---:|---:|:---|\n")
+		for _, u := range result.Applied {
+			b.WriteString(fmt.Sprintf("| %s | %s | %s | %s |\n",
+				mrEscapeCell(u.Dep.Name),
+				mrEscapeCell(u.OldVer),
+				mrEscapeCell(u.NewVer),
+				mrEscapeCell(u.UpdateType),
+			))
+		}
+		mrWriteDivider(&b)
+	}
+
+	// --- Security Fixes table ---
+	if len(cves) > 0 {
+		mrSection(&b, "\U0001F510 Security Fixes")
+		b.WriteString("| CVE | Severity | Fixed By |\n")
+		b.WriteString("|---|:---:|---|\n")
+		for _, c := range cves {
+			b.WriteString(fmt.Sprintf("| %s | %s | %s |\n",
+				mrEscapeCell(c.ID),
+				mrEscapeCell(c.Severity),
+				mrEscapeCell(c.FixedBy),
+			))
+		}
+		mrWriteDivider(&b)
+	}
+
+	// --- Files Changed ---
+	if len(files) > 0 {
+		mrSection(&b, "\U0001F4C2 Files Changed")
+		for _, f := range files {
+			b.WriteString(fmt.Sprintf("- %s\n", f))
+		}
+		mrWriteDivider(&b)
+	}
+
+	// --- Skipped Dependencies ---
+	if len(result.Skipped) > 0 {
+		type reasonGroup struct {
+			reason string
+			items  []dependency.SkippedDep
+		}
+		groupMap := make(map[string]*reasonGroup)
+		var groupOrder []string
+		for _, s := range result.Skipped {
+			r := dependency.NormalizeSkipReason(s.Reason)
+			g, ok := groupMap[r]
+			if !ok {
+				g = &reasonGroup{reason: r}
+				groupMap[r] = g
+				groupOrder = append(groupOrder, r)
+			}
+			g.items = append(g.items, s)
+		}
+		sort.Strings(groupOrder)
+
+		b.WriteString(fmt.Sprintf("\n<details>\n<summary>Skipped Dependencies (%d)</summary>\n\n", len(result.Skipped)))
+		for _, r := range groupOrder {
+			g := groupMap[r]
+			sort.Slice(g.items, func(i, j int) bool {
+				return g.items[i].Dep.Name < g.items[j].Dep.Name
+			})
+			b.WriteString(fmt.Sprintf("#### %s\n", r))
+			cap := 5
+			for i, s := range g.items {
+				if i >= cap {
+					b.WriteString(fmt.Sprintf("- ... and %d more\n", len(g.items)-cap))
+					break
+				}
+				b.WriteString(fmt.Sprintf("- %s %s\n", s.Dep.Name, s.Dep.Current))
+			}
+			b.WriteString("\n")
+		}
+		b.WriteString("</details>\n")
+		mrWriteDivider(&b)
+	}
+
+	// --- Verification ---
+	if result.Verified {
+		if result.VerifyErr != nil {
+			b.WriteString("\u274C Verification: failed\n")
+		} else {
+			b.WriteString("\u2705 Verification: passed\n")
+		}
+		mrWriteDivider(&b)
+	}
+
+	// --- Footer ---
+	b.WriteString("> Automated by **StageFreight**\n")
+
+	return b.String()
+}
+
+// mrSection writes a markdown section heading with correct blank-line spacing.
+func mrSection(b *strings.Builder, title string) {
+	b.WriteString("## " + title + "\n\n")
+}
+
+// mrWriteDivider writes a horizontal rule with correct blank-line spacing.
+func mrWriteDivider(b *strings.Builder) {
+	b.WriteString("\n---\n\n")
+}
+
+// mrEscapeCell escapes pipe characters and strips newlines for markdown table cells.
+func mrEscapeCell(s string) string {
+	s = strings.ReplaceAll(s, "|", "\\|")
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.ReplaceAll(s, "\r", "")
+	return s
+}
+
+// uniqueSortedStrings returns a deduplicated, sorted copy of ss.
+func uniqueSortedStrings(ss []string) []string {
+	if len(ss) == 0 {
+		return nil
+	}
+	cp := make([]string, len(ss))
+	copy(cp, ss)
+	sort.Strings(cp)
+	out := cp[:1]
+	for _, s := range cp[1:] {
+		if s != out[len(out)-1] {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// pluralize returns "N thing" or "N things" based on count.
+func pluralize(n int, singular, plural string) string {
+	if n == 1 {
+		return fmt.Sprintf("%d %s", n, singular)
+	}
+	return fmt.Sprintf("%d %s", n, plural)
+}
+
+// sanitizeBranchPrefix cleans a user-provided branch prefix for safety.
+// Returns empty string if the input is invalid.
+func sanitizeBranchPrefix(raw string) string {
+	p := strings.TrimSpace(raw)
+	p = strings.TrimPrefix(p, "refs/heads/")
+	p = strings.Trim(p, "/")
+	p = strings.TrimRight(p, "-")
+	if p == "" || strings.Contains(p, "..") || strings.Contains(p, " ") {
+		return ""
+	}
+	if strings.HasSuffix(p, ".lock") || strings.HasPrefix(p, "-") || strings.Contains(p, "@{") {
+		return ""
+	}
+	return p
 }

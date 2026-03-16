@@ -183,6 +183,12 @@ func Validate(cfg *Config) (warnings []string, err error) {
 			errs = append(errs, "dependency.commit: message is required when commit enabled")
 		}
 	}
+	if p := cfg.Dependency.Commit.Promotion; p != "" && p != PromotionDirect && p != PromotionMR {
+		errs = append(errs, fmt.Sprintf("dependency.commit.promotion: %q is invalid (expected %q or %q)", p, PromotionDirect, PromotionMR))
+	}
+	if cfg.Dependency.Commit.Promotion == PromotionMR && !cfg.Dependency.Commit.Push {
+		errs = append(errs, "dependency.commit: promotion \"mr\" requires push to be true (no remote branch means no merge request)")
+	}
 
 	// ── Docs ─────────────────────────────────────────────────────────────
 
