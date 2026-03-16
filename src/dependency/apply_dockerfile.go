@@ -252,15 +252,18 @@ func readLineAt(absPath string, lineNum int) (string, error) {
 }
 
 // findBindingLine scans a file for the physical line containing a binding key
-// (e.g. "BUILDX_VERSION"). Returns 1-based line number.
+// as an ENV assignment token (e.g. "BUILDX_VERSION=..." or "BUILDX_VERSION ...").
+// Returns the 1-based line number nearest to hintLine. Exact token match avoids
+// false positives from comments, URLs, or similarly named vars.
 func findBindingLine(absPath, binding string) (int, error) {
 	content, err := os.ReadFile(absPath)
 	if err != nil {
 		return 0, err
 	}
+	pattern := regexp.MustCompile(`(^|\s)` + regexp.QuoteMeta(binding) + `(=| )`)
 	lines := strings.Split(string(content), "\n")
 	for i, line := range lines {
-		if strings.Contains(line, binding) {
+		if pattern.MatchString(line) {
 			return i + 1, nil
 		}
 	}
