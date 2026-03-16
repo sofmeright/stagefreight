@@ -186,10 +186,18 @@ func buildEnvReplacement(dep freshness.Dependency, origLine string) (string, str
 		}
 		// m[4]:m[5] is the value capture group
 		foundValue := origLine[m[4]:m[5]]
-		if foundValue != dep.Current {
+		// Normalize v-prefix: freshness strips "v" from Current/Latest,
+		// but the raw file may have it (e.g. "v0.32.0" vs "0.32.0").
+		normalizedFound := strings.TrimPrefix(foundValue, "v")
+		if normalizedFound != dep.Current {
 			return origLine, "source value mismatch"
 		}
-		return origLine[:m[4]] + dep.Latest + origLine[m[5]:], ""
+		// Preserve original prefix when writing replacement
+		replacement := dep.Latest
+		if strings.HasPrefix(foundValue, "v") && !strings.HasPrefix(dep.Latest, "v") {
+			replacement = "v" + dep.Latest
+		}
+		return origLine[:m[4]] + replacement + origLine[m[5]:], ""
 	}
 
 	// Fallback: single-var ENV line via anchored regex.
@@ -197,10 +205,15 @@ func buildEnvReplacement(dep freshness.Dependency, origLine string) (string, str
 	if m == nil {
 		return origLine, "version not resolvable from source"
 	}
-	if m[2] != dep.Current {
+	normalizedFound := strings.TrimPrefix(m[2], "v")
+	if normalizedFound != dep.Current {
 		return origLine, "source value mismatch"
 	}
-	return m[1] + dep.Latest + m[3], ""
+	replacement := dep.Latest
+	if strings.HasPrefix(m[2], "v") && !strings.HasPrefix(dep.Latest, "v") {
+		replacement = "v" + dep.Latest
+	}
+	return m[1] + replacement + m[3], ""
 }
 
 // applyFileEdits writes the edited lines back to a file, verifying hashes.
