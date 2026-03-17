@@ -99,6 +99,16 @@ func buildRunner(ctx context.Context, appCfg *config.Config, ciCtx *ci.CIContext
 		return fmt.Errorf("no builds configured")
 	}
 
+	// Write SF_ARTIFACT_EXPIRY to dotenv artifact so downstream jobs inherit it.
+	// build-image's own expire_in must be set as a GitLab project variable separately.
+	if appCfg.CI.ArtifactExpiry != "" {
+		envPath := rootDir + "/.stagefreight/sf.env"
+		envContent := "SF_ARTIFACT_EXPIRY=" + appCfg.CI.ArtifactExpiry + "\n"
+		if writeErr := os.WriteFile(envPath, []byte(envContent), 0o644); writeErr != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not write sf.env: %v\n", writeErr)
+		}
+	}
+
 	// Read publish manifest to determine what was produced.
 	// Distinguish "not found" (no targets matched) from "unreadable" (real error).
 	// Unreadable manifest is NOT treated as "completed with no images" — that would

@@ -39,10 +39,13 @@ build-image:
     DOCKER_CERT_PATH: "/certs/client"
     DOCKER_TLS_CERTDIR: "/certs"
   artifacts:
-    paths: [.stagefreight/]
+    paths:
+      - .stagefreight/
+      - dist/
     reports:
       junit: .stagefreight/reports/lint.xml
-    expire_in: 2 hours
+      dotenv: .stagefreight/sf.env
+    expire_in: $SF_ARTIFACT_EXPIRY
   before_script:
     - *sf-context
     - docker context create tls-context --docker "host=$DOCKER_HOST,ca=$DOCKER_CERT_PATH/ca.pem,cert=$DOCKER_CERT_PATH/cert.pem,key=$DOCKER_CERT_PATH/key.pem"
@@ -72,7 +75,7 @@ dependency-update:
     - stagefreight ci run deps
   artifacts:
     paths: [.stagefreight/deps/]
-    expire_in: 1 week
+    expire_in: $SF_ARTIFACT_EXPIRY
   rules:
     - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
       when: on_success
@@ -91,7 +94,7 @@ security-scan:
     DOCKER_TLS_CERTDIR: "/certs"
   artifacts:
     paths: [.stagefreight/security/]
-    expire_in: 1 week
+    expire_in: $SF_ARTIFACT_EXPIRY
   before_script:
     - *sf-context
     - docker context create tls-context --docker "host=$DOCKER_HOST,ca=$DOCKER_CERT_PATH/ca.pem,cert=$DOCKER_CERT_PATH/cert.pem,key=$DOCKER_CERT_PATH/key.pem"
