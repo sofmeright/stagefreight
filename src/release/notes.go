@@ -71,6 +71,14 @@ type ImageRow struct {
 	Signature     string        // pull ref for signature artifact
 }
 
+// BinaryRow is a single binary or archive artifact for the Downloads table.
+type BinaryRow struct {
+	Name     string // filename (e.g., "stagefreight-linux-amd64.tar.gz")
+	Platform string // "linux/amd64", "darwin/arm64"
+	Size     int64  // bytes
+	SHA256   string // hex-encoded checksum
+}
+
 // NotesInput holds all data needed to render release notes.
 type NotesInput struct {
 	RepoDir      string // git repository directory
@@ -83,7 +91,8 @@ type NotesInput struct {
 	Version      string // version string (auto-detected if empty)
 	SHA          string // short commit hash (auto-detected if empty)
 	IsPrerelease bool   // true if version has prerelease suffix
-	Images       []ImageRow // resolved registry image rows for availability table
+	Images       []ImageRow  // resolved registry image rows for availability table
+	Downloads    []BinaryRow // binary/archive artifacts for downloads table
 }
 
 // GenerateNotes produces markdown release notes from git log between two refs.
@@ -188,6 +197,33 @@ func bulletize(text string) string {
 		bullets = append(bullets, line)
 	}
 	return strings.Join(bullets, "\n")
+}
+
+// formatBytes formats a byte count as a human-readable size.
+func formatBytes(b int64) string {
+	const (
+		kb = 1024
+		mb = 1024 * kb
+		gb = 1024 * mb
+	)
+	switch {
+	case b >= gb:
+		return fmt.Sprintf("%.1f GB", float64(b)/float64(gb))
+	case b >= mb:
+		return fmt.Sprintf("%.1f MB", float64(b)/float64(mb))
+	case b >= kb:
+		return fmt.Sprintf("%.1f KB", float64(b)/float64(kb))
+	default:
+		return fmt.Sprintf("%d B", b)
+	}
+}
+
+// truncHash returns the first 12 chars of a hex hash for compact display.
+func truncHash(h string) string {
+	if len(h) > 12 {
+		return h[:12] + "…"
+	}
+	return h
 }
 
 // releaseType returns a human-readable release type.
@@ -389,6 +425,26 @@ func renderNotes(input NotesInput, categories []CommitCategory, allCommits []Com
 			}
 			b.WriteString("</details>\n\n")
 		}
+	}
+
+	// 3b. Downloads table (binary/archive artifacts)
+	if len(input.Downloads) > 0 {
+		b.WriteString("## Downloads\n\n")
+		b.WriteString("| Platform | File | Size | SHA-256 |\n")
+		b.WriteString("|----------|------|------|---------|\n")
+		for _, dl := range input.Downloads {
+			b.WriteString(fmt.Sprintf("| `%s` | `%s` | %s | `%s` |\n",
+				dl.Platform, dl.Name, formatBytes(dl.Size), truncHash(dl.SHA256)))
+		}
+		b.WriteString("\n")
+
+		// Full checksums in collapsible block
+		b.WriteString("<details>\n<summary>Full checksums</summary>\n\n")
+		b.WriteString("```\n")
+		for _, dl := range input.Downloads {
+			b.WriteString(fmt.Sprintf("%s  %s\n", dl.SHA256, dl.Name))
+		}
+		b.WriteString("```\n</details>\n\n")
 	}
 
 	// 4. Highlights (tag message)

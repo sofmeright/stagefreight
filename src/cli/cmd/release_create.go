@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -253,6 +254,46 @@ func runReleaseCreate(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("publish manifest: %w", manifestErr)
 	}
 
+	// Build download rows and collect manifest assets for upload.
+	// Archives are the primary distributable; raw binaries are uploaded
+	// only when no archive covers that binary.
+	var downloadRows []release.BinaryRow
+	var manifestAssets []string // local paths to auto-upload
+
+	if manifest != nil {
+		// Track which binaries have archives
+		archivedBinaries := make(map[string]bool)
+		for _, a := range manifest.Archives {
+			archivedBinaries[a.BuildID+"/"+a.Binary.OS+"/"+a.Binary.Arch] = true
+		}
+
+		// Archives first — these are the user-facing downloads
+		for _, a := range manifest.Archives {
+			downloadRows = append(downloadRows, release.BinaryRow{
+				Name:     a.Name,
+				Platform: a.Binary.OS + "/" + a.Binary.Arch,
+				Size:     a.Size,
+				SHA256:   a.SHA256,
+			})
+			manifestAssets = append(manifestAssets, a.Path)
+		}
+
+		// Raw binaries only if no archive covers them
+		for _, bin := range manifest.Binaries {
+			key := bin.BuildID + "/" + bin.OS + "/" + bin.Arch
+			if archivedBinaries[key] {
+				continue
+			}
+			downloadRows = append(downloadRows, release.BinaryRow{
+				Name:     bin.Name,
+				Platform: bin.OS + "/" + bin.Arch,
+				Size:     bin.Size,
+				SHA256:   bin.SHA256,
+			})
+			manifestAssets = append(manifestAssets, bin.Path)
+		}
+	}
+
 	// Generate or load release notes
 	var notes string
 	if rcNotesFile != "" {
@@ -275,6 +316,7 @@ func runReleaseCreate(cmd *cobra.Command, args []string) error {
 			SHA:          sha,
 			IsPrerelease: versionInfo.IsPrerelease,
 			Images:       imageRows,
+			Downloads:    downloadRows,
 		}
 		notes, err = release.GenerateNotes(input)
 		if err != nil {
@@ -323,15 +365,10 @@ func runReleaseCreate(cmd *cobra.Command, args []string) error {
 	}
 	report.URL = rel.URL
 
-	// Upload assets
-	for _, assetPath := range rcAssets {
-		assetName := assetPath
-		for i := len(assetPath) - 1; i >= 0; i-- {
-			if assetPath[i] == '/' {
-				assetName = assetPath[i+1:]
-				break
-			}
-		}
+	// Upload assets: manifest artifacts (binaries/archives) + explicit --asset flags.
+	allAssets := append(manifestAssets, rcAssets...)
+	for _, assetPath := range allAssets {
+		assetName := filepath.Base(assetPath)
 
 		if err := forgeClient.UploadAsset(ctx, rel.ID, forge.Asset{
 			Name:     assetName,
@@ -495,14 +532,8 @@ func runReleaseCreate(cmd *cobra.Command, args []string) error {
 
 				// Sync assets to this target
 				if t.SyncAssets {
-					for _, assetPath := range rcAssets {
-						assetName := assetPath
-						for i := len(assetPath) - 1; i >= 0; i-- {
-							if assetPath[i] == '/' {
-								assetName = assetPath[i+1:]
-								break
-							}
-						}
+					for _, assetPath := range allAssets {
+						assetName := filepath.Base(assetPath)
 						if err := syncClient.UploadAsset(ctx, syncRel.ID, forge.Asset{
 							Name:     assetName,
 							FilePath: assetPath,
