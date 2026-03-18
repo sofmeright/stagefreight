@@ -14,7 +14,7 @@ func init() {
 	build.RegisterV2("binary", func() build.EngineV2 { return &binaryEngine{} })
 }
 
-// binaryEngine compiles Go binaries. ~150 lines. Plan + ExecuteStep only.
+// binaryEngine compiles Go binaries. Plan + ExecuteStep only.
 // All orchestration (ordering, concurrency, logging, artifact recording,
 // checksums, publish manifest) lives in core.
 type binaryEngine struct{}
@@ -47,35 +47,29 @@ func (e *binaryEngine) Detect(ctx context.Context, rootDir string) (*build.Detec
 }
 
 func (e *binaryEngine) Plan(ctx context.Context, cfg build.BuildConfig) ([]build.UniversalStep, error) {
-	if cfg.Language != "go" {
-		return nil, fmt.Errorf("binary engine: unsupported language %q (supported: go)", cfg.Language)
+	if cfg.Builder != "go" {
+		return nil, fmt.Errorf("binary engine: unsupported builder %q (supported: go)", cfg.Builder)
 	}
 
-	if cfg.Entry == "" {
-		return nil, fmt.Errorf("binary engine: entry is required")
+	if cfg.From == "" {
+		return nil, fmt.Errorf("binary engine: from is required")
 	}
 
-	// Resolve binary name
-	binaryName := cfg.BinaryName
+	// Resolve output artifact name
+	binaryName := cfg.Output
 	if binaryName == "" {
-		// Default: basename of entry directory
-		entry := cfg.Entry
-		if strings.HasSuffix(entry, ".go") {
-			entry = filepath.Dir(entry)
+		// Default: basename of from path
+		from := cfg.From
+		if strings.HasSuffix(from, ".go") {
+			from = filepath.Dir(from)
 		}
-		binaryName = filepath.Base(entry)
+		binaryName = filepath.Base(from)
 	}
 
-	// Resolve output template
-	outputTmpl := cfg.Output
-	if outputTmpl == "" {
-		outputTmpl = "dist/{os}-{arch}/{binary_name}"
-	}
-
-	// Resolve ldflags templates
-	ldflags := make([]string, len(cfg.LDFlags))
-	for i, f := range cfg.LDFlags {
-		ldflags[i] = resolveTemplateVars(f, cfg)
+	// Resolve template variables in args
+	args := make([]string, len(cfg.Args))
+	for i, a := range cfg.Args {
+		args[i] = resolveTemplateVars(a, cfg)
 	}
 
 	// Default env
@@ -92,8 +86,12 @@ func (e *binaryEngine) Plan(ctx context.Context, cfg build.BuildConfig) ([]build
 			physicalName += ".exe"
 		}
 
-		// Resolve output path
-		outputPath := resolveOutputPath(outputTmpl, cfg.ID, plat, binaryName, physicalName, cfg.Version)
+		// Output path: dist/{os}-{arch}/{binary_name}
+		outputPath := fmt.Sprintf("dist/%s-%s/%s", plat.OS, plat.Arch, physicalName)
+		if cfg.Version != nil && cfg.Version.Version != "" {
+			// Include version in path when available
+			outputPath = fmt.Sprintf("dist/%s-%s/%s", plat.OS, plat.Arch, physicalName)
+		}
 
 		stepID := build.StepIDForPlatform(cfg.ID, plat)
 
@@ -106,12 +104,11 @@ func (e *binaryEngine) Plan(ctx context.Context, cfg build.BuildConfig) ([]build
 				{Path: outputPath, Type: "binary"},
 			},
 			Meta: BinaryMeta{
-				Entry:      cfg.Entry,
+				From:       cfg.From,
 				BinaryName: physicalName,
 				OutputPath: outputPath,
-				LDFlags:    ldflags,
+				Args:       args,
 				Env:        env,
-				Strip:      cfg.Strip,
 				Compress:   cfg.Compress,
 			},
 		}
@@ -132,31 +129,15 @@ func (e *binaryEngine) ExecuteStep(ctx context.Context, step build.UniversalStep
 
 	gb := build.NewGoBuild(false)
 
-	// Resolve ldflags with strip flag
-	ldflags := meta.LDFlags
-	if meta.Strip {
-		// Prepend -s -w if not already present
-		hasStrip := false
-		for _, f := range ldflags {
-			if strings.Contains(f, "-s") && strings.Contains(f, "-w") {
-				hasStrip = true
-				break
-			}
-		}
-		if !hasStrip {
-			ldflags = append([]string{"-s -w"}, ldflags...)
-		}
-	}
-
 	// Get toolchain version for metadata
 	toolchain, _ := gb.ToolchainVersion(ctx)
 
 	result, err := gb.Build(ctx, build.GoBuildOpts{
-		Entry:      meta.Entry,
+		Entry:      meta.From,
 		OutputPath: meta.OutputPath,
 		GOOS:       step.Platform.OS,
 		GOARCH:     step.Platform.Arch,
-		LDFlags:    ldflags,
+		Args:       meta.Args,
 		Env:        meta.Env,
 	})
 	if err != nil {
@@ -182,20 +163,7 @@ func (e *binaryEngine) ExecuteStep(ctx context.Context, step build.UniversalStep
 	}, nil
 }
 
-// resolveOutputPath expands the output template for a specific platform.
-func resolveOutputPath(tmpl, buildID string, plat build.Platform, binaryName, physicalName string, v *build.VersionInfo) string {
-	s := tmpl
-	s = strings.ReplaceAll(s, "{id}", buildID)
-	s = strings.ReplaceAll(s, "{os}", plat.OS)
-	s = strings.ReplaceAll(s, "{arch}", plat.Arch)
-	s = strings.ReplaceAll(s, "{binary_name}", physicalName)
-	if v != nil {
-		s = strings.ReplaceAll(s, "{version}", v.Version)
-	}
-	return s
-}
-
-// resolveTemplateVars expands template variables in ldflags and similar strings.
+// resolveTemplateVars expands template variables in args and similar strings.
 func resolveTemplateVars(s string, cfg build.BuildConfig) string {
 	if cfg.Version != nil {
 		s = strings.ReplaceAll(s, "{version}", cfg.Version.Version)

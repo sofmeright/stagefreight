@@ -496,13 +496,12 @@ func toBuildConfig(b config.BuildConfig, v *gitver.VersionInfo) build.BuildConfi
 		SelectTags: b.SelectTags,
 		DependsOn:  b.DependsOn,
 		Version:    v,
-		Language:   b.Language,
-		Entry:      b.Entry,
-		BinaryName: b.BinaryName,
-		Output:     b.Output,
-		LDFlags:    b.LDFlags,
+		Builder:    b.Builder,
+		Command:    b.BuilderCommand(),
+		From:       b.From,
+		Output:     b.OutputName(),
+		Args:       b.Args,
 		Env:        b.Env,
-		Strip:      b.StripEnabled(),
 		Compress:   b.Compress,
 	}
 }

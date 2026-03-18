@@ -1,5 +1,10 @@
 package config
 
+import (
+	"path/filepath"
+	"strings"
+)
+
 // BuildConfig defines a named build artifact. Each build has a unique ID
 // (referenced by targets) and a kind that determines which fields are valid.
 //
@@ -45,33 +50,35 @@ type BuildConfig struct {
 	Cache CacheConfig `yaml:"cache,omitempty"`
 
 	// ── kind: binary ──────────────────────────────────────────────────────
+	// Generic build schema: builder selects toolchain, args are raw vendor-native
+	// arguments passed directly to the builder's command. No language-specific
+	// config branches — one stable object model for all binary builders.
 
-	// Language is the compilation language. Supported: "go". Future: "rust", "zig".
-	Language string `yaml:"language,omitempty"`
+	// Builder is the toolchain that interprets the build.
+	// Supported: "go". Future: "rust", "zig", "cargo".
+	Builder string `yaml:"builder,omitempty"`
 
-	// Entry is the main package path (Go) or source file.
-	// e.g., "cmd/planedc/main.go" or "cmd/planedc"
-	Entry string `yaml:"entry,omitempty"`
+	// Command is the builder subcommand. e.g., "build" for "go build".
+	// Default: "build".
+	Command string `yaml:"command,omitempty"`
 
-	// BinaryName is the output binary name. Default: basename of entry.
-	// Windows platforms auto-append ".exe".
-	BinaryName string `yaml:"binary_name,omitempty"`
+	// From is the source/input root or entry point.
+	// e.g., "./src/cli" (Go package), "./src/main.rs" (Rust).
+	From string `yaml:"from,omitempty"`
 
-	// Output is the output path template. Supports: {id}, {os}, {arch}, {version}, {binary_name}.
-	// Default: "dist/{os}-{arch}/{binary_name}"
+	// Output is the artifact name. Windows platforms auto-append ".exe".
+	// Default: basename of From.
 	Output string `yaml:"output,omitempty"`
 
-	// LDFlags are Go linker flags with template substitution.
-	// e.g., ["-s -w", "-X main.Version={version}"]
-	LDFlags []string `yaml:"ldflags,omitempty"`
+	// Args are ordered raw arguments passed directly to the selected builder.
+	// For Go: raw args to "go build". For Rust: raw args to "cargo build".
+	// Supports template variables: {version}, {sha}, {sha:N}, {date}.
+	Args []string `yaml:"args,omitempty"`
 
 	// Env are build environment variables. e.g., {"CGO_ENABLED": "0"}
 	Env map[string]string `yaml:"env,omitempty"`
 
-	// Strip removes debug symbols from the binary. Default: true for kind: binary.
-	Strip *bool `yaml:"strip,omitempty"`
-
-	// Compress enables UPX compression. Default: false.
+	// Compress enables UPX compression on the output binary. Default: false.
 	Compress bool `yaml:"compress,omitempty"`
 
 	// Crucible holds crucible-specific configuration for binary builds.
@@ -85,10 +92,26 @@ type CrucibleConfig struct {
 	ToolchainImage string `yaml:"toolchain_image,omitempty"`
 }
 
-// StripEnabled returns whether strip is enabled, defaulting to true for binary builds.
-func (b BuildConfig) StripEnabled() bool {
-	if b.Strip != nil {
-		return *b.Strip
+// BuilderCommand returns the builder command, defaulting to "build".
+func (b BuildConfig) BuilderCommand() string {
+	if b.Command != "" {
+		return b.Command
 	}
-	return b.Kind == "binary"
+	return "build"
+}
+
+// OutputName returns the output artifact name, defaulting to basename of From.
+func (b BuildConfig) OutputName() string {
+	if b.Output != "" {
+		return b.Output
+	}
+	if b.From != "" {
+		// Strip trailing .go/.rs suffixes, then take basename
+		from := b.From
+		for _, suffix := range []string{".go", ".rs"} {
+			from = strings.TrimSuffix(from, suffix)
+		}
+		return filepath.Base(from)
+	}
+	return b.ID
 }

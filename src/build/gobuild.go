@@ -34,7 +34,7 @@ type GoBuildOpts struct {
 	OutputPath string            // output binary path
 	GOOS       string
 	GOARCH     string
-	LDFlags    []string
+	Args       []string          // raw args passed before entry (e.g., ["-tags", "banner_art", "-ldflags", "..."])
 	Env        map[string]string // additional env vars (e.g., CGO_ENABLED=0)
 }
 
@@ -63,9 +63,8 @@ func (g *GoBuild) Build(ctx context.Context, opts GoBuildOpts) (*GoBuildResult, 
 	// Build go build args
 	args := []string{"build"}
 
-	if len(opts.LDFlags) > 0 {
-		args = append(args, "-ldflags", strings.Join(opts.LDFlags, " "))
-	}
+	// Append raw builder args (e.g., -tags, -ldflags, etc.)
+	args = append(args, opts.Args...)
 
 	args = append(args, "-o", opts.OutputPath, entry)
 

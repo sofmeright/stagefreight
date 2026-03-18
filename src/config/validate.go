@@ -54,13 +54,13 @@ func Validate(cfg *Config) (warnings []string, err error) {
 		// DependsOn reference validation (deferred until all IDs collected)
 		// Binary-specific validation
 		if b.Kind == "binary" {
-			if b.Language == "" {
-				errs = append(errs, fmt.Sprintf("%s: kind binary requires language (supported: go)", bpath))
-			} else if b.Language != "go" {
-				errs = append(errs, fmt.Sprintf("%s: unknown language %q (supported: go)", bpath, b.Language))
+			if b.Builder == "" {
+				errs = append(errs, fmt.Sprintf("%s: kind binary requires builder (supported: go)", bpath))
+			} else if b.Builder != "go" {
+				errs = append(errs, fmt.Sprintf("%s: unknown builder %q (supported: go)", bpath, b.Builder))
 			}
-			if b.Entry == "" {
-				errs = append(errs, fmt.Sprintf("%s: kind binary requires entry (main package path)", bpath))
+			if b.From == "" {
+				errs = append(errs, fmt.Sprintf("%s: kind binary requires from (source entry point)", bpath))
 			}
 			// Docker-only fields should not be set on binary builds
 			if b.Dockerfile != "" {
@@ -73,23 +73,20 @@ func Validate(cfg *Config) (warnings []string, err error) {
 				errs = append(errs, fmt.Sprintf("%s: target is not valid for kind binary", bpath))
 			}
 			if len(b.BuildArgs) > 0 {
-				errs = append(errs, fmt.Sprintf("%s: build_args is not valid for kind binary (use env)", bpath))
+				errs = append(errs, fmt.Sprintf("%s: build_args is not valid for kind binary (use args)", bpath))
 			}
 		}
 
 		// Docker-only: binary fields should not be set
 		if b.Kind == "docker" {
-			if b.Language != "" {
-				errs = append(errs, fmt.Sprintf("%s: language is not valid for kind docker", bpath))
+			if b.Builder != "" {
+				errs = append(errs, fmt.Sprintf("%s: builder is not valid for kind docker", bpath))
 			}
-			if b.Entry != "" {
-				errs = append(errs, fmt.Sprintf("%s: entry is not valid for kind docker", bpath))
+			if b.From != "" {
+				errs = append(errs, fmt.Sprintf("%s: from is not valid for kind docker", bpath))
 			}
-			if b.BinaryName != "" {
-				errs = append(errs, fmt.Sprintf("%s: binary_name is not valid for kind docker", bpath))
-			}
-			if len(b.LDFlags) > 0 {
-				errs = append(errs, fmt.Sprintf("%s: ldflags is not valid for kind docker", bpath))
+			if len(b.Args) > 0 {
+				errs = append(errs, fmt.Sprintf("%s: args is not valid for kind docker", bpath))
 			}
 			if len(b.Env) > 0 {
 				errs = append(errs, fmt.Sprintf("%s: env is not valid for kind docker", bpath))

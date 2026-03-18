@@ -54,14 +54,13 @@ type BuildConfig struct {
 	Registries []RegistryTarget
 
 	// kind: binary fields
-	Language   string
-	Entry      string
-	BinaryName string
-	Output     string
-	LDFlags    []string
-	Env        map[string]string
-	Strip      bool
-	Compress   bool
+	Builder  string
+	Command  string
+	From     string
+	Output   string
+	Args     []string
+	Env      map[string]string
+	Compress bool
 }
 
 var (
