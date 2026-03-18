@@ -27,20 +27,6 @@ builds:
     build_mode: crucible
     platforms: [linux/amd64]
 
-  - id: stagefreight-cli
-    kind: binary
-    builder: go
-    command: build
-    from: ./src/cli
-    output: stagefreight
-    platforms: [linux/amd64, linux/arm64, darwin/amd64, darwin/arm64]
-    env:
-      CGO_ENABLED: "0"
-    args:
-      - "-tags"
-      - "banner_art"
-      - "-ldflags"
-      - "-s -w -X github.com/PrPlanIT/StageFreight/src/version.Version={version} -X github.com/PrPlanIT/StageFreight/src/version.Commit={sha} -X github.com/PrPlanIT/StageFreight/src/version.BuildDate={date}"
 
 targets:
   # ── Docker Hub: stable releases ─────────────────────────────────
@@ -88,6 +74,20 @@ targets:
     retention:
       keep_last: 6
       protect: ["latest-dev"]
+
+  # ── Harbor: dev builds on every commit ──────────────────────────
+  # Mirror of dockerhub-dev for local Harbor registry testing.
+  - id: harbor-dev
+    kind: registry
+    build: stagefreight
+    url: cr.pcfae.com
+    provider: harbor
+    path: "{var:org}/{var:repo}"
+    tags:
+      - "dev-{sha:8}"
+      - "latest-dev"
+    when: { branches: [main], events: [push] }
+    credentials: HARBOR
 
   # ── Docker Hub: README sync ──────────────────────────────────────
   - id: dockerhub-readme
