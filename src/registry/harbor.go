@@ -3,6 +3,7 @@ package registry
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"net/url"
 	"strings"
@@ -115,6 +116,26 @@ func (h *Harbor) UpdateDescription(ctx context.Context, repo, short, full string
 		return fmt.Errorf("harbor: updating description for %s: %w", repo, err)
 	}
 	return nil
+}
+
+// EnsureProject creates the Harbor project if it does not already exist.
+// 409 Conflict is treated as success (project already exists).
+// Returns raw-wrapped HTTP errors — callers add credential prefix context.
+func (h *Harbor) EnsureProject(ctx context.Context, projectName string) error {
+	payload := map[string]interface{}{
+		"project_name": projectName,
+		"public":       false,
+	}
+	apiURL := fmt.Sprintf("%s/api/v2.0/projects", h.baseURL)
+	_, err := h.client.doJSON(ctx, "POST", apiURL, payload, nil)
+	if err == nil {
+		return nil
+	}
+	var httpErr *HTTPError
+	if errors.As(err, &httpErr) && httpErr.StatusCode == 409 {
+		return nil // already exists
+	}
+	return fmt.Errorf("ensuring project %q: %w", projectName, err)
 }
 
 // splitHarborRepo splits "project/repo" into project and repository name.

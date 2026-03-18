@@ -386,6 +386,10 @@ func dockerExecutePhase() pipeline.Phase {
 						output.SectionEnd(pc.Writer, "sf_build")
 						return nil, err
 					}
+					if err := loginBx.EnsureHarborProjects(pc.Ctx, step.Registries); err != nil {
+						output.SectionEnd(pc.Writer, "sf_build")
+						return nil, err
+					}
 					break
 				}
 			}
