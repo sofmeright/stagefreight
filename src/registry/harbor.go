@@ -102,18 +102,38 @@ func (h *Harbor) DeleteTag(ctx context.Context, repo string, tag string) error {
 }
 
 func (h *Harbor) UpdateDescription(ctx context.Context, repo, short, full string) error {
-	project, _ := splitHarborRepo(repo)
+	project, repoName := splitHarborRepo(repo)
 
-	payload := map[string]interface{}{
-		"metadata": map[string]string{
-			"description": short,
-		},
+	// Harbor has one description field per repository (no separate short/full).
+	// Prefer full markdown; fall back to short.
+	desc := full
+	if desc == "" {
+		desc = short
 	}
 
-	apiURL := fmt.Sprintf("%s/api/v2.0/projects/%s", h.baseURL, url.PathEscape(project))
+	payload := map[string]interface{}{
+		"description": desc,
+	}
+
+	apiURL := fmt.Sprintf("%s/api/v2.0/projects/%s/repositories/%s",
+		h.baseURL, url.PathEscape(project), url.PathEscape(repoName))
 	_, err := h.client.doJSON(ctx, "PUT", apiURL, payload, nil)
 	if err != nil {
 		return fmt.Errorf("harbor: updating description for %s: %w", repo, err)
+	}
+	return nil
+}
+
+// TriggerScan initiates a vulnerability scan on a pushed artifact via Harbor's built-in Trivy.
+// reference is a tag or digest. Best-effort — callers warn on error rather than failing the build.
+func (h *Harbor) TriggerScan(ctx context.Context, repo, reference string) error {
+	project, repoName := splitHarborRepo(repo)
+
+	apiURL := fmt.Sprintf("%s/api/v2.0/projects/%s/repositories/%s/artifacts/%s/scan",
+		h.baseURL, url.PathEscape(project), url.PathEscape(repoName), url.PathEscape(reference))
+	_, err := h.client.doJSON(ctx, "POST", apiURL, nil, nil)
+	if err != nil {
+		return fmt.Errorf("harbor: triggering scan for %s@%s: %w", repo, reference, err)
 	}
 	return nil
 }

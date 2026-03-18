@@ -58,6 +58,14 @@ type TargetConfig struct {
 	// e.g., ["{version}", "{major}.{minor}", "latest"]
 	Tags []string `yaml:"tags,omitempty"`
 
+	// NativeScan enables post-push vulnerability scanning via the registry's own built-in scanner.
+	// Distinct from StageFreight's own scan pipeline (Trivy/Grype run by StageFreight itself).
+	// Currently supported: Harbor (triggers Harbor's built-in Trivy after each push).
+	// No-op for Docker Hub, GHCR, Quay, JFrog, and other providers.
+	// Best-effort — scan failures warn but do not fail the build.
+	// Push success does not imply scan success; results appear in the registry UI only.
+	NativeScan bool `yaml:"native_scan,omitempty"`
+
 	// ── kind: docker-readme ───────────────────────────────────────────────
 
 	// File is the path to the README file (kind: docker-readme).

@@ -50,4 +50,5 @@ type RegistryTarget struct {
 	Provider    string                 // registry vendor: dockerhub, ghcr, gitlab, jfrog, harbor, quay, gitea, generic
 	Retention   config.RetentionPolicy // restic-style retention policy
 	TagPatterns []string               // original unresolved tag templates for pattern matching during retention
+	NativeScan  bool                   // trigger registry's own built-in scan after push (Harbor: built-in Trivy)
 }

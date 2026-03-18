@@ -315,6 +315,33 @@ func (bx *Buildx) EnsureHarborProjects(ctx context.Context, registries []Registr
 	return nil
 }
 
+// TriggerHarborScans fires a vulnerability scan on Harbor for each pushed tag
+// where scan: true is configured. Best-effort — scan failures are warned, never fail the build.
+// Must be called after push. Dedupes by (registryURL, path, tag).
+func (bx *Buildx) TriggerHarborScans(ctx context.Context, registries []RegistryTarget) {
+	seen := map[string]struct{}{}
+	for _, reg := range registries {
+		if !reg.NativeScan || registry.NormalizeProvider(reg.Provider) != "harbor" || reg.Credentials == "" {
+			continue
+		}
+		cred := credentials.ResolvePrefix(reg.Credentials)
+		if !cred.IsSet() {
+			continue
+		}
+		h := registry.NewHarbor(reg.URL, cred.User, cred.Secret)
+		for _, tag := range reg.Tags {
+			key := reg.URL + "|" + reg.Path + ":" + tag
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			if err := h.TriggerScan(ctx, reg.Path, tag); err != nil {
+				diag.Warn("harbor scan trigger %s/%s:%s: %v", reg.URL, reg.Path, tag, err)
+			}
+		}
+	}
+}
+
 // DetectProvider determines the registry vendor from the URL.
 // Well-known domains are matched directly. For unknown domains, returns "generic"
 // (future: probe the registry API to identify the vendor).

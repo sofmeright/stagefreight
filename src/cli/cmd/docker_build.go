@@ -448,6 +448,13 @@ func dockerExecutePhase() pipeline.Phase {
 			}
 			buildElapsed := time.Since(buildStart)
 
+			// Trigger Harbor scans after multi-platform push
+			for _, step := range plan.Steps {
+				if step.Push {
+					bx.TriggerHarborScans(pc.Ctx, step.Registries)
+				}
+			}
+
 			// Record multi-platform pushes (step.Push = true → buildx --push)
 			for _, step := range plan.Steps {
 				if !step.Push {
@@ -561,6 +568,13 @@ func dockerExecutePhase() pipeline.Phase {
 				if err := pushBx.PushTags(pc.Ctx, remoteTags); err != nil {
 					output.SectionEnd(pc.Writer, "sf_push")
 					return nil, err
+				}
+
+				// Trigger Harbor scans after single-platform push
+				for _, step := range plan.Steps {
+					if step.Load && !step.Push {
+						bx.TriggerHarborScans(pc.Ctx, step.Registries)
+					}
 				}
 
 				pushElapsed := time.Since(pushStart)

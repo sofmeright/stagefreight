@@ -165,6 +165,7 @@ func planDockerBuild(b config.BuildConfig, cfg *config.Config, det *build.Detect
 			Provider:    provider,
 			Retention:   retention,
 			TagPatterns: t.Tags,
+			NativeScan:  t.NativeScan,
 		}
 		registries = append(registries, target)
 
