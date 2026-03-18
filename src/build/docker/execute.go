@@ -61,6 +61,24 @@ func classifyPushError(stderr string) string {
 	}
 }
 
+// collectPushRegistries returns the non-local registries from load-then-push
+// steps (step.Load && !step.Push). Used to pass registry targets to push
+// recovery without inlining the loop at each call site.
+func collectPushRegistries(plan *build.BuildPlan) []build.RegistryTarget {
+	var regs []build.RegistryTarget
+	for _, step := range plan.Steps {
+		if !step.Load || step.Push {
+			continue
+		}
+		for _, reg := range step.Registries {
+			if reg.Provider != "local" {
+				regs = append(regs, reg)
+			}
+		}
+	}
+	return regs
+}
+
 // executePhase builds images via buildx, pushes, and signs.
 // Build + push + sign are kept in one phase because they share buildx state,
 // publish manifest accumulation, and deferred metadata file cleanup.
@@ -139,19 +157,18 @@ func executePhase(req Request) pipeline.Phase {
 				}
 				stepResult.Layers = layers
 
-				// Harbor push-first recovery: if a multi-platform --push build fails
-				// because the Harbor project doesn't exist yet, create it and retry once.
-				if err != nil && step.Push && postbuild.IsHarborProjectMissingPushError(step.Registries, stderrBuf.String()) {
-					diag.Info("harbor: push failed with project-not-found, attempting auto-create and retry")
-					if ensureErr := postbuild.EnsureHarborProjects(pc.Ctx, step.Registries); ensureErr == nil {
+				// Registry push recovery: if a multi-platform --push build fails
+				// due to a recoverable registry error, attempt vendor recovery and retry once.
+				if err != nil && step.Push {
+					recovery := postbuild.RecoverPushFailure(pc.Ctx, step.Registries, stderrBuf.String())
+					if recovery.Retry {
+						diag.Info(recovery.Message)
 						stderrBuf.Reset()
 						stepResult, layers, err = bx.BuildWithLayers(pc.Ctx, step)
 						if stepResult == nil {
 							stepResult = &build.StepResult{Name: step.Name, Status: "failed"}
 						}
 						stepResult.Layers = layers
-					} else {
-						diag.Warn("harbor: auto-create failed: %v", ensureErr)
 					}
 				}
 
@@ -188,10 +205,10 @@ func executePhase(req Request) pipeline.Phase {
 			}
 			buildElapsed := time.Since(buildStart)
 
-			// Trigger Harbor scans after multi-platform push
+			// Post-push hooks (scan triggers, etc.) after multi-platform push
 			for _, step := range plan.Steps {
 				if step.Push {
-					postbuild.TriggerHarborScans(pc.Ctx, step.Registries)
+					postbuild.PostPushHooks(pc.Ctx, step.Registries)
 				}
 			}
 
@@ -308,37 +325,24 @@ func executePhase(req Request) pipeline.Phase {
 				}
 				pushed, err := pushBx.PushTags(pc.Ctx, remoteTags)
 				if err != nil {
-					// Harbor push-first recovery: collect registries from load-then-push steps
-					// and check if the failure is a missing Harbor project.
-					var pushRegs []build.RegistryTarget
-					for _, step := range plan.Steps {
-						if !step.Load || step.Push {
-							continue
+					pushRegs := collectPushRegistries(plan)
+					recovery := postbuild.RecoverPushFailure(pc.Ctx, pushRegs, pushStderrBuf.String())
+					if recovery.Retry {
+						if recovery.Message != "" {
+							diag.Info(recovery.Message)
 						}
-						for _, reg := range step.Registries {
-							if reg.Provider != "local" {
-								pushRegs = append(pushRegs, reg)
-							}
+						// Retry only from the failed tag onward — prior tags already succeeded.
+						remaining := remoteTags
+						if pushed >= 0 && pushed < len(remoteTags) {
+							remaining = remoteTags[pushed:]
 						}
-					}
-					if postbuild.IsHarborProjectMissingPushError(pushRegs, pushStderrBuf.String()) {
-						diag.Info("harbor: push failed with project-not-found, attempting auto-create and retry")
-						if ensureErr := postbuild.EnsureHarborProjects(pc.Ctx, pushRegs); ensureErr == nil {
-							// Retry only from the failed tag onward — prior tags already succeeded.
-							remaining := remoteTags
-							if pushed >= 0 && pushed < len(remoteTags) {
-								remaining = remoteTags[pushed:]
-							}
-							pushStderrBuf.Reset()
-							if pc.Verbose {
-								pushBx.Stderr = io.MultiWriter(req.Stderr, &pushStderrBuf)
-							} else {
-								pushBx.Stderr = &pushStderrBuf
-							}
-							_, err = pushBx.PushTags(pc.Ctx, remaining)
+						pushStderrBuf.Reset()
+						if pc.Verbose {
+							pushBx.Stderr = io.MultiWriter(req.Stderr, &pushStderrBuf)
 						} else {
-							diag.Warn("harbor: auto-create failed: %v", ensureErr)
+							pushBx.Stderr = &pushStderrBuf
 						}
+						_, err = pushBx.PushTags(pc.Ctx, remaining)
 					}
 					if err != nil {
 						pushStderr := pushStderrBuf.String()
@@ -375,10 +379,10 @@ func executePhase(req Request) pipeline.Phase {
 					}
 				}
 
-				// Trigger Harbor scans after single-platform push
+				// Post-push hooks (scan triggers, etc.) after single-platform push
 				for _, step := range plan.Steps {
 					if step.Load && !step.Push {
-						postbuild.TriggerHarborScans(pc.Ctx, step.Registries)
+						postbuild.PostPushHooks(pc.Ctx, step.Registries)
 					}
 				}
 
