@@ -21,6 +21,7 @@ import (
 	"github.com/PrPlanIT/StageFreight/src/config"
 	"github.com/PrPlanIT/StageFreight/src/diag"
 	"github.com/PrPlanIT/StageFreight/src/gitver"
+	"github.com/PrPlanIT/StageFreight/src/publish"
 	"github.com/PrPlanIT/StageFreight/src/output"
 	"github.com/PrPlanIT/StageFreight/src/registry"
 	"github.com/PrPlanIT/StageFreight/src/version"
@@ -386,7 +387,7 @@ func dockerExecutePhase() pipeline.Phase {
 						output.SectionEnd(pc.Writer, "sf_build")
 						return nil, err
 					}
-					if err := loginBx.EnsureHarborProjects(pc.Ctx, step.Registries); err != nil {
+					if err := publish.EnsureHarborProjects(pc.Ctx, step.Registries); err != nil {
 						output.SectionEnd(pc.Writer, "sf_build")
 						return nil, err
 					}
@@ -451,7 +452,7 @@ func dockerExecutePhase() pipeline.Phase {
 			// Trigger Harbor scans after multi-platform push
 			for _, step := range plan.Steps {
 				if step.Push {
-					bx.TriggerHarborScans(pc.Ctx, step.Registries)
+					publish.TriggerHarborScans(pc.Ctx, step.Registries)
 				}
 			}
 
@@ -573,7 +574,7 @@ func dockerExecutePhase() pipeline.Phase {
 				// Trigger Harbor scans after single-platform push
 				for _, step := range plan.Steps {
 					if step.Load && !step.Push {
-						bx.TriggerHarborScans(pc.Ctx, step.Registries)
+						publish.TriggerHarborScans(pc.Ctx, step.Registries)
 					}
 				}
 

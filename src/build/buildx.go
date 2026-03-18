@@ -3,7 +3,6 @@ package build
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -13,7 +12,6 @@ import (
 
 	"github.com/PrPlanIT/StageFreight/src/credentials"
 	"github.com/PrPlanIT/StageFreight/src/diag"
-	"github.com/PrPlanIT/StageFreight/src/registry"
 )
 
 // Buildx wraps docker buildx commands.
@@ -263,83 +261,6 @@ func (bx *Buildx) Login(ctx context.Context, registries []RegistryTarget) error 
 		}
 	}
 	return nil
-}
-
-// EnsureHarborProjects pre-creates Harbor projects for all Harbor registry targets
-// that have credentials configured. Must be called after Login() and only when
-// a real remote push will occur. Dedupes by (registryURL, project).
-func (bx *Buildx) EnsureHarborProjects(ctx context.Context, registries []RegistryTarget) error {
-	seen := map[string]struct{}{}
-	for _, reg := range registries {
-		if registry.NormalizeProvider(reg.Provider) != "harbor" || reg.Credentials == "" {
-			continue
-		}
-		// Trim leading slash defensively — config validation should prevent it,
-		// but a stray "/" would make the first segment empty and silently misbehave.
-		project := strings.TrimPrefix(reg.Path, "/")
-		if idx := strings.IndexByte(project, '/'); idx >= 0 {
-			project = project[:idx]
-		}
-		if project == "" {
-			return fmt.Errorf("harbor %s: registry target has empty path — check config", reg.URL)
-		}
-		key := reg.URL + "|" + project
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
-
-		cred := credentials.ResolvePrefix(reg.Credentials)
-		if !cred.IsSet() {
-			upper := strings.ToUpper(reg.Credentials)
-			return fmt.Errorf("harbor %s: credentials %q configured but %s_USER and %s_TOKEN/%s_PASS/%s_PASSWORD are not set",
-				reg.URL, reg.Credentials, upper, upper, upper, upper)
-		}
-		h := registry.NewHarbor(reg.URL, cred.User, cred.Secret)
-		if err := h.EnsureProject(ctx, project); err != nil {
-			upper := strings.ToUpper(reg.Credentials)
-			var httpErr *registry.HTTPError
-			if errors.As(err, &httpErr) {
-				switch httpErr.StatusCode {
-				case 401:
-					return fmt.Errorf("harbor %s: authentication failed while ensuring project %q — check %s_USER and %s_TOKEN/%s_PASS/%s_PASSWORD: %w",
-						reg.URL, project, upper, upper, upper, upper, err)
-				case 403:
-					return fmt.Errorf("harbor %s: account %q lacks 'Create Project' permission for project %q — grant it or pre-create the project: %w",
-						reg.URL, cred.User, project, err)
-				}
-			}
-			return fmt.Errorf("harbor %s: %w", reg.URL, err)
-		}
-	}
-	return nil
-}
-
-// TriggerHarborScans fires a vulnerability scan on Harbor for each pushed tag
-// where scan: true is configured. Best-effort — scan failures are warned, never fail the build.
-// Must be called after push. Dedupes by (registryURL, path, tag).
-func (bx *Buildx) TriggerHarborScans(ctx context.Context, registries []RegistryTarget) {
-	seen := map[string]struct{}{}
-	for _, reg := range registries {
-		if !reg.NativeScan || registry.NormalizeProvider(reg.Provider) != "harbor" || reg.Credentials == "" {
-			continue
-		}
-		cred := credentials.ResolvePrefix(reg.Credentials)
-		if !cred.IsSet() {
-			continue
-		}
-		h := registry.NewHarbor(reg.URL, cred.User, cred.Secret)
-		for _, tag := range reg.Tags {
-			key := reg.URL + "|" + reg.Path + ":" + tag
-			if _, ok := seen[key]; ok {
-				continue
-			}
-			seen[key] = struct{}{}
-			if err := h.TriggerScan(ctx, reg.Path, tag); err != nil {
-				diag.Warn("harbor scan trigger %s/%s:%s: %v", reg.URL, reg.Path, tag, err)
-			}
-		}
-	}
 }
 
 // DetectProvider determines the registry vendor from the URL.
