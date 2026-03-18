@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/PrPlanIT/StageFreight/src/build"
 	"github.com/PrPlanIT/StageFreight/src/config"
+	"github.com/PrPlanIT/StageFreight/src/credentials"
 	"github.com/PrPlanIT/StageFreight/src/diag"
 	"github.com/PrPlanIT/StageFreight/src/forge"
 	"github.com/PrPlanIT/StageFreight/src/gitver"
@@ -147,23 +148,12 @@ func runReleaseCreate(cmd *cobra.Command, args []string) error {
 		if len(manifest.Published) > 0 {
 			// Credential resolver for verification
 			credResolver := func(prefix string) (string, string) {
-				if prefix == "" {
-					return "", ""
+				cred := credentials.ResolvePrefix(prefix)
+				if cred.Kind == credentials.SecretPassword {
+					diag.Warn("credentials %s: authenticating with %s — consider using %s_TOKEN instead (scoped, revocable)",
+						prefix, cred.SecretEnv, strings.ToUpper(prefix))
 				}
-				upper := strings.ToUpper(prefix)
-				// Prefer _TOKEN — tokens are scoped and revocable.
-				// Fall back to _PASS or _PASSWORD with a warning.
-				pass := os.Getenv(upper + "_TOKEN")
-				if pass == "" {
-					for _, suffix := range []string{"_PASS", "_PASSWORD"} {
-						if pw := os.Getenv(upper + suffix); pw != "" {
-							diag.Warn("credentials %s: authenticating with %s%s — consider using %s_TOKEN instead (scoped, revocable)", prefix, upper, suffix, upper)
-							pass = pw
-							break
-						}
-					}
-				}
-				return os.Getenv(upper + "_USER"), pass
+				return cred.User, cred.Secret
 			}
 
 			// Remote verification

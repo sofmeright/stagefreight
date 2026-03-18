@@ -8,10 +8,10 @@ package registry
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
+	"github.com/PrPlanIT/StageFreight/src/credentials"
 	"github.com/PrPlanIT/StageFreight/src/diag"
 )
 
@@ -60,56 +60,35 @@ func NormalizeProvider(p string) string {
 }
 
 // NewRegistry creates a registry client for the given provider.
-// Credentials are resolved from environment variables using the prefix:
-//
-//	prefix: "DOCKER" → DOCKER_USER / DOCKER_PASS
-//	prefix: "GHCR_ORG" → GHCR_ORG_USER / GHCR_ORG_PASS
-//
+// Credentials are resolved via credentials.ResolvePrefix — see that package
+// for the full resolution order (_TOKEN → _PASS → _PASSWORD).
 // The registryURL is the base URL (e.g., "docker.io", "ghcr.io").
 func NewRegistry(provider, registryURL, credentialPrefix string) (Registry, error) {
 	provider = NormalizeProvider(provider)
-	user, pass := resolveCredentials(credentialPrefix)
+	cred := credentials.ResolvePrefix(credentialPrefix)
+	if cred.Kind == credentials.SecretPassword {
+		diag.Warn("credentials %s: authenticating with %s — consider using %s_TOKEN instead (scoped, revocable)",
+			credentialPrefix, cred.SecretEnv, strings.ToUpper(credentialPrefix))
+	}
 
 	switch provider {
 	case "local":
 		return NewLocal(), nil
 	case "docker":
-		return NewDockerHub(user, pass), nil
+		return NewDockerHub(cred.User, cred.Secret), nil
 	case "gitlab":
-		return NewGitLab(registryURL, user, pass), nil
+		return NewGitLab(registryURL, cred.User, cred.Secret), nil
 	case "github":
-		return NewGHCR(user, pass), nil
+		return NewGHCR(cred.User, cred.Secret), nil
 	case "quay":
-		return NewQuay(registryURL, user, pass), nil
+		return NewQuay(registryURL, cred.User, cred.Secret), nil
 	case "jfrog":
-		return NewJFrog(registryURL, user, pass), nil
+		return NewJFrog(registryURL, cred.User, cred.Secret), nil
 	case "harbor":
-		return NewHarbor(registryURL, user, pass), nil
+		return NewHarbor(registryURL, cred.User, cred.Secret), nil
 	case "gitea", "forgejo":
-		return NewGitea(registryURL, user, pass), nil
+		return NewGitea(registryURL, cred.User, cred.Secret), nil
 	default:
 		return nil, fmt.Errorf("registry: unsupported provider %q (valid: docker, github, gitlab, quay, jfrog, harbor, gitea, forgejo)", provider)
 	}
-}
-
-// resolveCredentials reads USERNAME and PASSWORD from env vars using the
-// configured prefix. Returns empty strings if no prefix or vars are unset.
-func resolveCredentials(prefix string) (user, pass string) {
-	if prefix == "" {
-		return "", ""
-	}
-	p := strings.ToUpper(prefix)
-	// Prefer _TOKEN — tokens are scoped and revocable.
-	// Fall back to _PASS or _PASSWORD with a warning.
-	pass = os.Getenv(p + "_TOKEN")
-	if pass == "" {
-		for _, suffix := range []string{"_PASS", "_PASSWORD"} {
-			if pw := os.Getenv(p + suffix); pw != "" {
-				diag.Warn("credentials %s: authenticating with %s%s — consider using %s_TOKEN instead (scoped, revocable)", prefix, p, suffix, p)
-				pass = pw
-				break
-			}
-		}
-	}
-	return os.Getenv(p + "_USER"), pass
 }

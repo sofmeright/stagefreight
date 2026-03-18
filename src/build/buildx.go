@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/PrPlanIT/StageFreight/src/credentials"
 	"github.com/PrPlanIT/StageFreight/src/diag"
 )
 
@@ -235,25 +236,16 @@ func (bx *Buildx) Login(ctx context.Context, registries []RegistryTarget) error 
 			continue
 		}
 
-		prefix := strings.ToUpper(reg.Credentials)
-		user := os.Getenv(prefix + "_USER")
-		// Prefer _TOKEN — tokens are scoped and revocable.
-		// Fall back to _PASS or _PASSWORD with a warning.
-		pass := os.Getenv(prefix + "_TOKEN")
-		if pass == "" {
-			for _, suffix := range []string{"_PASS", "_PASSWORD"} {
-				if pw := os.Getenv(prefix + suffix); pw != "" {
-					diag.Warn("registry %s: authenticating with %s%s — consider using %s_TOKEN instead (scoped, revocable)", reg.URL, prefix, suffix, prefix)
-					pass = pw
-					break
-				}
-			}
-		}
-
-		if user == "" || pass == "" {
+		cred := credentials.ResolvePrefix(reg.Credentials)
+		if !cred.IsSet() {
 			return fmt.Errorf("registry %s: credentials %q configured but %s_USER and/or %s_TOKEN env vars not set",
-				reg.URL, reg.Credentials, prefix, prefix)
+				reg.URL, reg.Credentials, strings.ToUpper(reg.Credentials), strings.ToUpper(reg.Credentials))
 		}
+		if cred.Kind == credentials.SecretPassword {
+			diag.Warn("registry %s: authenticating with %s — consider using %s_TOKEN instead (scoped, revocable)",
+				reg.URL, cred.SecretEnv, strings.ToUpper(reg.Credentials))
+		}
+		user, pass := cred.User, cred.Secret
 
 		if bx.Verbose {
 			fmt.Fprintf(bx.Stderr, "exec: docker login -u %s --password-stdin %s\n", user, reg.URL)
