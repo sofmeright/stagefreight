@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/PrPlanIT/StageFreight/src/build"
+	"github.com/PrPlanIT/StageFreight/src/build/docker"
 	"github.com/PrPlanIT/StageFreight/src/config"
 	"github.com/PrPlanIT/StageFreight/src/diag"
 )
@@ -144,7 +145,7 @@ func generateForBuild(cfg *config.Config, bc config.BuildConfig, opts GenerateOp
 		dockerfilePath = filepath.Join(opts.RootDir, dockerfilePath)
 	}
 
-	inv, err := build.ExtractInventory(dockerfilePath)
+	inv, err := docker.ExtractInventory(dockerfilePath)
 	if err != nil {
 		// Non-fatal: inventory extraction is best-effort
 		diag.Warn("  warning: inventory extraction failed for %s: %v", bc.ID, err)
@@ -222,7 +223,7 @@ func buildBuild(cfg *config.Config, bc config.BuildConfig) Build {
 	return b
 }
 
-func convertInventory(inv *build.InventoryResult) Invs {
+func convertInventory(inv *docker.InventoryResult) Invs {
 	result := Invs{
 		Versions: []InvItem{},
 		Lineage:  []InvItem{},
@@ -269,7 +270,7 @@ func convertInventory(inv *build.InventoryResult) Invs {
 	return result
 }
 
-func convertPackage(p build.PackageInfo) InvItem {
+func convertPackage(p docker.PackageInfo) InvItem {
 	item := InvItem{
 		Name:      p.Name,
 		Version:   p.Version,

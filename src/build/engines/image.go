@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/PrPlanIT/StageFreight/src/build"
+	"github.com/PrPlanIT/StageFreight/src/build/docker"
 	"github.com/PrPlanIT/StageFreight/src/config"
 	"github.com/PrPlanIT/StageFreight/src/gitver"
 	"github.com/PrPlanIT/StageFreight/src/registry"
@@ -326,7 +327,7 @@ func (e *imageEngine) Execute(ctx context.Context, plan *build.BuildPlan) (*buil
 	start := time.Now()
 	result := &build.BuildResult{}
 
-	bx := build.NewBuildx(false)
+	bx := docker.NewBuildx(false)
 
 	// Authenticate to registries before building.
 	// All steps share the same daemon auth state, so one login pass is sufficient.

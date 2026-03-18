@@ -90,7 +90,7 @@ func planPhase(req Request) pipeline.Phase {
 					if len(step.Tags) == 0 {
 						step.Tags = []string{"stagefreight:dev"}
 					}
-				} else if build.IsMultiPlatform(*step) {
+				} else if IsMultiPlatform(*step) {
 					step.Push = true
 				} else {
 					step.Load = true

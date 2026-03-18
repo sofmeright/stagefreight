@@ -69,8 +69,8 @@ func runCrucibleMode(req Request) error {
 
 	// Generate run ID and temp tags
 	runID := build.GenerateCrucibleRunID()
-	crucibleTag := build.CrucibleTag("candidate", runID)
-	finalTag := build.CrucibleTag("verify", runID)
+	crucibleTag := CrucibleTag("candidate", runID)
+	finalTag := CrucibleTag("verify", runID)
 
 	// Inject project description
 	if desc := postbuild.FirstDockerReadmeDescription(req.Config); desc != "" {
@@ -184,7 +184,7 @@ func runCrucibleMode(req Request) error {
 	// Gestation: Build
 	buildStart := time.Now()
 
-	bx := build.NewBuildx(req.Verbose)
+	bx := NewBuildx(req.Verbose)
 	var stderrBuf bytes.Buffer
 	bx.Stdout = io.Discard
 	if req.Verbose {
@@ -303,7 +303,7 @@ func runCrucibleMode(req Request) error {
 		extraFlags = append(extraFlags, "--config", req.ConfigFile)
 	}
 
-	crucibleResult, crucibleErr := build.RunCrucible(ctx, build.CrucibleOpts{
+	crucibleResult, crucibleErr := RunCrucible(ctx, CrucibleOpts{
 		Image:      crucibleTag,
 		FinalTag:   finalTag,
 		RepoDir:    rootDir,
@@ -317,14 +317,14 @@ func runCrucibleMode(req Request) error {
 	// Crucible Verification
 	// ═══════════════════════════════════════════════════════════
 
-	var verification *build.CrucibleVerification
+	var verification *CrucibleVerification
 	cruciblePassed := crucibleResult != nil && crucibleResult.Passed
 
 	if cruciblePassed {
-		verification, err = build.VerifyCrucible(ctx, crucibleTag, finalTag)
+		verification, err = VerifyCrucible(ctx, crucibleTag, finalTag)
 		if err != nil {
 			// Verification infra failure — still viable
-			verification = &build.CrucibleVerification{TrustLevel: build.TrustViable}
+			verification = &CrucibleVerification{TrustLevel: build.TrustViable}
 		}
 		verifySec := output.NewSection(w, "Crucible Verification", 0, color)
 		for _, c := range verification.ArtifactChecks {
@@ -428,7 +428,7 @@ func runCrucibleMode(req Request) error {
 	}
 
 	// Cleanup
-	cleanupErr := build.CleanupCrucibleImages(ctx, crucibleTag, finalTag)
+	cleanupErr := CleanupCrucibleImages(ctx, crucibleTag, finalTag)
 	if cleanupErr != nil {
 		output.SummaryRow(w, "cleanup", "failed", cleanupErr.Error(), color)
 	} else {

@@ -1,86 +1,18 @@
-package build
+package docker
 
 import (
 	"context"
-	"crypto/rand"
 	"fmt"
 	"io"
 	"net"
 	"net/url"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 
+	"github.com/PrPlanIT/StageFreight/src/build"
 	"github.com/PrPlanIT/StageFreight/src/diag"
 )
-
-// Crucible environment variables.
-const (
-	// CrucibleEnvVar is set to "1" inside the pass-2 container to prevent recursion.
-	CrucibleEnvVar = "STAGEFREIGHT_CRUCIBLE"
-
-	// CrucibleRunIDEnvVar correlates pass-1 and pass-2 in logs/artifacts.
-	CrucibleRunIDEnvVar = "STAGEFREIGHT_CRUCIBLE_RUN_ID"
-
-	// CrucibleAllowEnvVar overrides the repo guard for non-StageFreight repos.
-	CrucibleAllowEnvVar = "STAGEFREIGHT_ALLOW_CRUCIBLE"
-
-	// StageFreightModule is the canonical Go module path used by the repo guard.
-	StageFreightModule = "github.com/PrPlanIT/StageFreight"
-)
-
-// Trust levels, ordered from weakest to strongest.
-const (
-	TrustViable        = "viable"        // pass 2 succeeded
-	TrustConsistent    = "consistent"    // version + build graph match
-	TrustDeterministic = "deterministic" // binary hash identical
-	TrustReproducible  = "reproducible"  // image digest identical (stretch goal)
-)
-
-// IsCrucibleChild returns true when running inside a crucible pass-2 container.
-func IsCrucibleChild() bool {
-	return os.Getenv(CrucibleEnvVar) == "1"
-}
-
-// EnsureCrucibleAllowed checks that the repo is the StageFreight repo itself,
-// or that STAGEFREIGHT_ALLOW_CRUCIBLE=1 is set.
-func EnsureCrucibleAllowed(rootDir string) error {
-	if os.Getenv(CrucibleAllowEnvVar) == "1" {
-		return nil
-	}
-
-	goMod := filepath.Join(rootDir, "go.mod")
-	data, err := os.ReadFile(goMod)
-	if err != nil {
-		return fmt.Errorf("crucible: cannot read go.mod: %w\n  set %s=1 to override the repo guard", err, CrucibleAllowEnvVar)
-	}
-
-	for _, line := range strings.Split(string(data), "\n") {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "module ") {
-			mod := strings.TrimSpace(strings.TrimPrefix(line, "module"))
-			if mod == StageFreightModule {
-				return nil
-			}
-			return fmt.Errorf("crucible: module %q is not %s\n  set %s=1 to override the repo guard",
-				mod, StageFreightModule, CrucibleAllowEnvVar)
-		}
-	}
-
-	return fmt.Errorf("crucible: no module directive found in go.mod\n  set %s=1 to override the repo guard", CrucibleAllowEnvVar)
-}
-
-// GenerateCrucibleRunID returns a cryptographically random hex string for
-// correlating crucible passes. Uses crypto/rand to avoid collisions in CI
-// where multiple pipelines may start at the same nanosecond.
-func GenerateCrucibleRunID() string {
-	b := make([]byte, 6) // 48 bits → 12 hex chars
-	if _, err := rand.Read(b); err != nil {
-		return "000000000000"
-	}
-	return fmt.Sprintf("%x", b)
-}
 
 // CrucibleOpts configures the pass-2 container invocation.
 type CrucibleOpts struct {
@@ -149,8 +81,8 @@ func RunCrucible(ctx context.Context, opts CrucibleOpts) (*CrucibleResult, error
 	args = append(args, "-v", opts.RepoDir+":"+opts.RepoDir, "-w", opts.RepoDir)
 
 	// Recursion guard + run ID
-	args = append(args, "-e", CrucibleEnvVar+"=1")
-	args = append(args, "-e", CrucibleRunIDEnvVar+"="+opts.RunID)
+	args = append(args, "-e", build.CrucibleEnvVar+"=1")
+	args = append(args, "-e", build.CrucibleRunIDEnvVar+"="+opts.RunID)
 
 	// Forward credential and CI env vars
 	for _, ev := range opts.EnvVars {
@@ -295,25 +227,8 @@ func (cv *CrucibleVerification) HasHardFailure() bool {
 	return false
 }
 
-// TrustLevelLabel returns human text for the trust level with context when
-// the level is below deterministic.
-func TrustLevelLabel(level string) string {
-	switch level {
-	case TrustDeterministic:
-		return "deterministic (binary identical)"
-	case TrustReproducible:
-		return "reproducible (image identical)"
-	case TrustConsistent:
-		return "consistent (binary mismatch)"
-	case TrustViable:
-		return "viable (determinism not achieved)"
-	default:
-		return level
-	}
-}
-
 // VerifyCrucible compares pass-1 and pass-2 images to determine trust level.
-// Uses promoted identity helpers from identity.go for all inspections.
+// Uses promoted identity helpers from image_inspect.go for all inspections.
 func VerifyCrucible(ctx context.Context, pass1Image, pass2Image string) (*CrucibleVerification, error) {
 	v := &CrucibleVerification{}
 
@@ -339,7 +254,7 @@ func VerifyCrucible(ctx context.Context, pass1Image, pass2Image string) (*Crucib
 	} else {
 		v.ArtifactChecks = append(v.ArtifactChecks, CrucibleCheck{
 			Name: "binary hash", Status: "differs",
-			Detail: fmt.Sprintf("pass1=%s pass2=%s", TruncHash(hash1), TruncHash(hash2)),
+			Detail: fmt.Sprintf("pass1=%s pass2=%s", build.TruncHash(hash1), build.TruncHash(hash2)),
 		})
 	}
 
@@ -370,7 +285,7 @@ func VerifyCrucible(ctx context.Context, pass1Image, pass2Image string) (*Crucib
 		})
 	} else if dig1 == dig2 {
 		v.ArtifactChecks = append(v.ArtifactChecks, CrucibleCheck{
-			Name: "image digest", Status: "match", Detail: TruncHash(dig1),
+			Name: "image digest", Status: "match", Detail: build.TruncHash(dig1),
 		})
 	} else {
 		v.ArtifactChecks = append(v.ArtifactChecks, CrucibleCheck{
@@ -381,12 +296,12 @@ func VerifyCrucible(ctx context.Context, pass1Image, pass2Image string) (*Crucib
 	// --- Execution checks ---
 
 	// Build graph — compare plan hashes embedded as OCI labels
-	graph1, gerr1 := ImageLabel(ctx, pass1Image, LabelPlanHash)
-	graph2, gerr2 := ImageLabel(ctx, pass2Image, LabelPlanHash)
+	graph1, gerr1 := ImageLabel(ctx, pass1Image, build.LabelPlanHash)
+	graph2, gerr2 := ImageLabel(ctx, pass2Image, build.LabelPlanHash)
 	if gerr1 != nil || gerr2 != nil || graph1 == "" || graph2 == "" {
 		v.ExecutionChecks = append(v.ExecutionChecks, CrucibleCheck{
 			Name: "build graph", Status: "unavailable",
-			Detail: fmt.Sprintf("label %s not found", LabelPlanHash),
+			Detail: fmt.Sprintf("label %s not found", build.LabelPlanHash),
 		})
 	} else if graph1 == graph2 {
 		v.ExecutionChecks = append(v.ExecutionChecks, CrucibleCheck{
@@ -395,7 +310,7 @@ func VerifyCrucible(ctx context.Context, pass1Image, pass2Image string) (*Crucib
 	} else {
 		v.ExecutionChecks = append(v.ExecutionChecks, CrucibleCheck{
 			Name: "build graph", Status: "differs",
-			Detail: fmt.Sprintf("pass1=%s pass2=%s", TruncHash(graph1), TruncHash(graph2)),
+			Detail: fmt.Sprintf("pass1=%s pass2=%s", build.TruncHash(graph1), build.TruncHash(graph2)),
 		})
 	}
 
@@ -426,18 +341,18 @@ func VerifyCrucible(ctx context.Context, pass1Image, pass2Image string) (*Crucib
 // computeTrustLevel determines the highest achievable trust from check results.
 func computeTrustLevel(v *CrucibleVerification) string {
 	if v.HasHardFailure() {
-		return TrustViable
+		return build.TrustViable
 	}
 
 	for _, c := range v.ArtifactChecks {
 		if c.Name == "image digest" && c.Status == "match" {
-			return TrustReproducible
+			return build.TrustReproducible
 		}
 	}
 
 	for _, c := range v.ArtifactChecks {
 		if c.Name == "binary hash" && c.Status == "match" {
-			return TrustDeterministic
+			return build.TrustDeterministic
 		}
 	}
 
@@ -454,8 +369,8 @@ func computeTrustLevel(v *CrucibleVerification) string {
 		}
 	}
 	if versionOK && graphOK {
-		return TrustConsistent
+		return build.TrustConsistent
 	}
 
-	return TrustViable
+	return build.TrustViable
 }

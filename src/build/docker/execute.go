@@ -46,7 +46,7 @@ func executePhase(req Request) pipeline.Phase {
 			buildStart := time.Now()
 
 			// Always capture output for structured display; verbose forwards stderr in real-time
-			bx := build.NewBuildx(pc.Verbose)
+			bx := NewBuildx(pc.Verbose)
 			var stderrBuf bytes.Buffer
 			bx.Stdout = io.Discard
 			if pc.Verbose {
@@ -157,7 +157,7 @@ func executePhase(req Request) pipeline.Phase {
 				var capturedDigest string
 				if step.MetadataFile != "" {
 					for attempt := 0; attempt < 3; attempt++ {
-						if d, mErr := build.ParseMetadataDigest(step.MetadataFile); mErr == nil {
+						if d, mErr := ParseMetadataDigest(step.MetadataFile); mErr == nil {
 							capturedDigest = d
 							break
 						} else if attempt == 2 {
@@ -185,7 +185,7 @@ func executePhase(req Request) pipeline.Phase {
 
 						var observedBuildx string
 						for i := 0; i < 3; i++ {
-							d, rErr := build.ResolveDigest(pc.Ctx, ref)
+							d, rErr := ResolveDigest(pc.Ctx, ref)
 							if rErr == nil {
 								observedBuildx = d
 								break
@@ -340,7 +340,7 @@ func executePhase(req Request) pipeline.Phase {
 
 							var capturedDigest string
 							for i := 0; i < 6; i++ {
-								d, rErr := build.ResolveDigest(pc.Ctx, ref)
+								d, rErr := ResolveDigest(pc.Ctx, ref)
 								if rErr == nil {
 									capturedDigest = d
 									break
@@ -352,7 +352,7 @@ func executePhase(req Request) pipeline.Phase {
 							}
 
 							if capturedDigest == "" {
-								if d, lErr := build.ResolveLocalDigest(pc.Ctx, ref); lErr == nil {
+								if d, lErr := ResolveLocalDigest(pc.Ctx, ref); lErr == nil {
 									capturedDigest = d
 									diag.Info("publish: resolved digest via local RepoDigests fallback for %s", ref)
 								}
@@ -396,8 +396,8 @@ func executePhase(req Request) pipeline.Phase {
 
 			// --- Cosign signing (best-effort) ---
 			if publishModeUsed {
-				cosignKey := build.ResolveCosignKey()
-				cosignOnPath := build.CosignAvailable()
+				cosignKey := ResolveCosignKey()
+				cosignOnPath := CosignAvailable()
 				signingAttempted := cosignOnPath && cosignKey != ""
 
 				if signingAttempted {
@@ -425,10 +425,10 @@ func executePhase(req Request) pipeline.Phase {
 							}
 						}
 
-						signErr := build.CosignSign(pc.Ctx, digestRef, cosignKey, multiArch)
+						signErr := CosignSign(pc.Ctx, digestRef, cosignKey, multiArch)
 
 						if _, statErr := os.Stat(dssePath); statErr == nil {
-							_ = build.CosignAttest(pc.Ctx, digestRef, dssePath, cosignKey)
+							_ = CosignAttest(pc.Ctx, digestRef, dssePath, cosignKey)
 						}
 
 						if signErr != nil {

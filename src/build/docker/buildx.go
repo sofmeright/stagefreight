@@ -1,4 +1,4 @@
-package build
+package docker
 
 import (
 	"context"
@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/PrPlanIT/StageFreight/src/build"
 	"github.com/PrPlanIT/StageFreight/src/credentials"
 	"github.com/PrPlanIT/StageFreight/src/diag"
 )
@@ -33,9 +34,9 @@ func NewBuildx(verbose bool) *Buildx {
 // Build executes a single build step via docker buildx.
 // When ParseLayers is true, buildx runs with --progress=plain and the output
 // is parsed into layer events for structured display.
-func (bx *Buildx) Build(ctx context.Context, step BuildStep) (*StepResult, error) {
+func (bx *Buildx) Build(ctx context.Context, step build.BuildStep) (*build.StepResult, error) {
 	start := time.Now()
-	result := &StepResult{
+	result := &build.StepResult{
 		Name: step.Name,
 	}
 
@@ -66,9 +67,9 @@ func (bx *Buildx) Build(ctx context.Context, step BuildStep) (*StepResult, error
 // BuildWithLayers executes a build step and parses the output for layer events.
 // Uses --progress=plain to get parseable output. The original Stdout/Stderr
 // writers receive the raw output; layer events are parsed from the stderr copy.
-func (bx *Buildx) BuildWithLayers(ctx context.Context, step BuildStep) (*StepResult, []LayerEvent, error) {
+func (bx *Buildx) BuildWithLayers(ctx context.Context, step build.BuildStep) (*build.StepResult, []build.LayerEvent, error) {
 	start := time.Now()
-	result := &StepResult{
+	result := &build.StepResult{
 		Name: step.Name,
 	}
 
@@ -131,7 +132,7 @@ func injectProgressPlain(args []string) []string {
 }
 
 // buildArgs constructs the docker buildx build argument list.
-func (bx *Buildx) buildArgs(step BuildStep) []string {
+func (bx *Buildx) buildArgs(step build.BuildStep) []string {
 	args := []string{"buildx", "build"}
 
 	// Dockerfile
@@ -175,7 +176,7 @@ func (bx *Buildx) buildArgs(step BuildStep) []string {
 		args = append(args, "--push")
 	case step.Load:
 		args = append(args, "--load")
-	case step.Output == OutputLocal:
+	case step.Output == build.OutputLocal:
 		// Extract to local filesystem — handled separately
 		args = append(args, "--output", "type=local,dest=.")
 	}
@@ -212,7 +213,7 @@ func (bx *Buildx) PushTags(ctx context.Context, tags []string) error {
 
 // IsMultiPlatform returns true if the step targets more than one platform.
 // Multi-platform builds cannot use --load (buildx limitation).
-func IsMultiPlatform(step BuildStep) bool {
+func IsMultiPlatform(step build.BuildStep) bool {
 	return len(step.Platforms) > 1
 }
 
@@ -224,7 +225,7 @@ func IsMultiPlatform(step BuildStep) bool {
 //
 // No credentials field → no login attempted (public or pre-authenticated).
 // If credentials are configured but the env vars are missing, Login returns an error.
-func (bx *Buildx) Login(ctx context.Context, registries []RegistryTarget) error {
+func (bx *Buildx) Login(ctx context.Context, registries []build.RegistryTarget) error {
 	for _, reg := range registries {
 		if reg.Provider == "local" {
 			continue
@@ -261,44 +262,6 @@ func (bx *Buildx) Login(ctx context.Context, registries []RegistryTarget) error 
 		}
 	}
 	return nil
-}
-
-// DetectProvider determines the registry vendor from the URL.
-// Well-known domains are matched directly. For unknown domains, returns "generic"
-// (future: probe the registry API to identify the vendor).
-func DetectProvider(registryURL string) string {
-	host := strings.ToLower(registryURL)
-	// Strip scheme if present
-	if idx := strings.Index(host, "://"); idx >= 0 {
-		host = host[idx+3:]
-	}
-	// Strip path
-	if idx := strings.IndexByte(host, '/'); idx >= 0 {
-		host = host[:idx]
-	}
-
-	switch {
-	case host == "docker.io" || host == "registry-1.docker.io" || host == "index.docker.io":
-		return "dockerhub"
-	case host == "ghcr.io":
-		return "ghcr"
-	case host == "quay.io":
-		return "quay"
-	case strings.Contains(host, "gitlab"):
-		return "gitlab"
-	case strings.Contains(host, "jfrog") || strings.Contains(host, "artifactory") || strings.Contains(host, "jcr"):
-		return "jfrog"
-	case strings.Contains(host, "harbor"):
-		return "harbor"
-	case strings.HasSuffix(host, ".amazonaws.com") && strings.Contains(host, ".dkr.ecr."):
-		return "ecr"
-	case strings.HasSuffix(host, ".pkg.dev"):
-		return "gar"
-	case strings.HasSuffix(host, ".azurecr.io"):
-		return "acr"
-	default:
-		return "generic"
-	}
 }
 
 // Save exports a loaded image as a tarball for downstream scanning and attestation.

@@ -9,12 +9,12 @@ These are enforced by convention; violations should be caught in code review.
 |---------|------|------------|
 | `src/artifact` | Published artifact identity and manifest (cross-cutting, no execution logic) | — (stdlib only) |
 | `src/cli/cmd` | CLI adapters only — flag parsing, Cobra wiring, CI runner orchestration | everything |
-| `src/build/docker` | Docker build orchestration (detect → plan → execute → publish) | artifact, build, pipeline, postbuild, registry |
+| `src/build/docker` | Docker/buildx adapter: CLI execution, cosign signing, image inspection, buildx parsing, crucible engine, Dockerfile inventory; plus build orchestration (detect → plan → execute → publish) | build (parent), artifact, config, credentials, diag, output, pipeline, postbuild, registry |
 | `src/build/pipeline` | Generic in-process phase runner and PipelineContext | artifact, build, config |
 | `src/cistate` | Cross-job file-based state ledger (pipeline.json) | ci |
 | `src/postbuild` | Post-build integration glue (badges, retention, harbor, readme) | artifact, build, pipeline, registry |
 | `src/registry` | Registry client + operational integration (verification, retention, referrers) | artifact, config, credentials, diag, retention |
-| `src/build` | Build planning, execution, identity, and publish-adjacent utilities | config, gitver; execution/proving paths also use credentials, diag |
+| `src/build` | Shared build foundation: engine interfaces, plan/step/result, provenance model, OCI labeling, detection, tags, version | config, gitver; credentials/diag in execution paths |
 
 ## Scratch Rules
 
@@ -92,10 +92,16 @@ These rules are intended for future automated checking.
     wrapper-owned state fanout
 
 ### `src/build` (root package files only)
+- **Identity:** shared build foundation — NOT a Docker implementation home
 - **Permitted:** `config`, `gitver`, `artifact`
 - **Permitted in execution/proving paths only:** `credentials`, `diag`
 - **Forbidden:** `forge`, `release`, `cli`, `postbuild`
 - **Forbidden in root package:** `registry`
+- **Rules:**
+  - Root must NOT contain CLI adapter code (docker/buildx/cosign/podman command invocation)
+  - Shared build semantics (provenance model, OCI labels, plan fingerprinting) belong here
+  - Docker adapter code belongs in `build/docker/`
+  - Binary-specific code (gobuild.go, archive.go) stays until volume justifies `build/binary/`
 - **Subpackage note:** `build/docker` and `build/pipeline` are higher-level coordinators
   and may have wider imports consistent with their orchestration role
 
