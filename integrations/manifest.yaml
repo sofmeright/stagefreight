@@ -1,5 +1,5 @@
 version: 1
-stagefreight_image: docker.jcr.pcfae.com/prplanit/stagefreight:latest-dev
+stagefreight_image: docker.cr.pcfae.com/prplanit/stagefreight:latest-dev
 subsystems: [build, deps, security, docs, release]
 
 normalized_env:

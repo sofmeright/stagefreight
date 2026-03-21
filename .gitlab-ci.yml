@@ -25,13 +25,13 @@ workflow:
   - export SF_CI_PIPELINE_ID="${CI_PIPELINE_ID}"
 
 default:
-  image: docker.jcr.pcfae.com/prplanit/stagefreight:latest-dev
+  image: docker.cr.pcfae.com/prplanit/stagefreight:latest-dev
   interruptible: true
 
 build-image:
   stage: build
   services:
-    - name: docker.jcr.pcfae.com/docker:27-dind
+    - name: docker.cr.pcfae.com/docker:27-dind
       alias: docker
   variables:
     DOCKER_HOST: "tcp://docker:2376"
@@ -56,7 +56,7 @@ build-image:
 dependency-update:
   stage: deps
   services:
-    - name: docker.jcr.pcfae.com/docker:27-dind
+    - name: docker.cr.pcfae.com/docker:27-dind
       alias: docker
   variables:
     GIT_DEPTH: 0
@@ -82,7 +82,7 @@ security-scan:
   stage: security
   needs: [build-image]
   services:
-    - name: docker.jcr.pcfae.com/docker:27-dind
+    - name: docker.cr.pcfae.com/docker:27-dind
       alias: docker
   variables:
     DOCKER_HOST: "tcp://docker:2376"
