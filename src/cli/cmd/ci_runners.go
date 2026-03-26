@@ -18,6 +18,7 @@ import (
 	"github.com/PrPlanIT/StageFreight/src/config"
 	"github.com/PrPlanIT/StageFreight/src/dependency"
 	"github.com/PrPlanIT/StageFreight/src/forge"
+	"github.com/PrPlanIT/StageFreight/src/gitver"
 	"github.com/PrPlanIT/StageFreight/src/lint"
 	"github.com/PrPlanIT/StageFreight/src/lint/modules/freshness"
 	"github.com/PrPlanIT/StageFreight/src/output"
@@ -662,6 +663,10 @@ func syncMirrors(ctx context.Context, appCfg *config.Config, releaseData *stagef
 	hasDegraded := false
 
 	for _, m := range appCfg.Sources.Mirrors {
+		// Resolve {var:...} templates in mirror config fields.
+		m.URL = gitver.ResolveVars(m.URL, appCfg.Vars)
+		m.ProjectID = gitver.ResolveVars(m.ProjectID, appCfg.Vars)
+
 		// 1. Git mirror (if enabled)
 		if m.Sync.Git {
 			result, err := stagefreightsync.MirrorPush(ctx, worktree, m)
