@@ -70,6 +70,11 @@ func MirrorPush(ctx context.Context, worktree string, accessory config.MirrorCon
 		return result, nil
 	}
 
+	// CI runners often checkout as detached HEAD. The bare clone may miss
+	// branch refs that exist in the source repo's packed-refs. Explicitly
+	// fetch all heads and tags from the source to guarantee a complete refset.
+	_ = gitExec(ctx, tmpDir, "fetch", absWorktree, "+refs/heads/*:refs/heads/*", "+refs/tags/*:refs/tags/*")
+
 	// 2. Build authenticated remote URL (internal only — never surfaced)
 	remoteURL, err := buildAuthURL(accessory)
 	if err != nil {
