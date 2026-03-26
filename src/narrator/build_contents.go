@@ -2,9 +2,9 @@ package narrator
 
 import (
 	"fmt"
-	"os"
 	"strings"
 
+	"github.com/PrPlanIT/StageFreight/src/diag"
 	"github.com/PrPlanIT/StageFreight/src/manifest"
 )
 
@@ -49,7 +49,7 @@ func (b BuildContentsModule) Render() string {
 		// No wrapping.
 	default:
 		// Unreachable with valid config. Refuse to render rather than silently degrade.
-		fmt.Fprintf(os.Stderr, "narrator: BUG: unknown wrap value %q reached runtime (config validation should have rejected this)\n", b.Wrap)
+		diag.Warn("narrator: BUG: unknown wrap value %q reached runtime (config validation should have rejected this)", b.Wrap)
 		return ""
 	}
 
