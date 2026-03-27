@@ -47,7 +47,7 @@ func DefaultDocsConfig() DocsConfig {
 				".stagefreight/badges",
 			},
 			Push:   true,
-			SkipCI: true,
+			SkipCI: false,
 		},
 	}
 }

@@ -124,9 +124,14 @@ func IsBranchHeadFresh(ciCtx *CIContext) bool {
 
 	headSHA := resolveRemoteHead(ciCtx.Branch)
 	if headSHA == "" {
+		fmt.Fprintf(os.Stderr, "  freshness: remote lookup failed (branch=%s), allowing execution\n", ciCtx.Branch)
 		return true // can't resolve, fail open
 	}
-	return headSHA == ciCtx.SHA
+
+	fresh := headSHA == ciCtx.SHA
+	fmt.Fprintf(os.Stderr, "  freshness: branch=%s local=%s remote=%s fresh=%t\n",
+		ciCtx.Branch, shortSHA(ciCtx.SHA), shortSHA(headSHA), fresh)
+	return fresh
 }
 
 // resolveRemoteHead returns the current HEAD SHA for a branch from the remote.
@@ -142,6 +147,14 @@ func resolveRemoteHead(branch string) string {
 		return ""
 	}
 	return parts[0]
+}
+
+// shortSHA safely truncates a SHA to 8 chars. Returns as-is if shorter.
+func shortSHA(s string) string {
+	if len(s) > 8 {
+		return s[:8]
+	}
+	return s
 }
 
 // FormatHandoffMessage returns a human-readable message for the handoff result.

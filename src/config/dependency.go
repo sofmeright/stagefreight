@@ -71,7 +71,7 @@ func DefaultDependencyConfig() DependencyConfig {
 			Type:      "chore",
 			Message:   "update managed dependencies",
 			Push:      true,
-			SkipCI:    true,
+			SkipCI:    false,
 			Promotion: PromotionDirect,
 			MR: DependencyMRConfig{
 				BranchPrefix: "stagefreight/deps",
