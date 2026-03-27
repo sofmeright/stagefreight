@@ -63,9 +63,9 @@ type RegexRewrite struct {
 	Replace string `yaml:"replace"`
 }
 
-// RenderConfig controls highlight output defaults.
+// RenderConfig controls glossary-level output defaults.
+// Surface-specific max entries live in presentation config.
 type RenderConfig struct {
-	MaxHighlights int    `yaml:"max_highlights"`
 	EmptyStrategy string `yaml:"empty_strategy"` // prompt | fail | allow_empty
 }
 
@@ -101,7 +101,6 @@ func DefaultGlossaryConfig() GlossaryConfig {
 			NormalizeWhitespace: true,
 		},
 		Render: RenderConfig{
-			MaxHighlights: 10,
 			EmptyStrategy: "prompt",
 		},
 	}
