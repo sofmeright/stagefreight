@@ -11,7 +11,7 @@ stages:
 
 workflow:
   auto_cancel:
-    on_new_commit: interruptible
+    on_new_commit: none
 
 .stagefreight-context: &sf-context
   - export SF_CI_PROVIDER=gitlab
