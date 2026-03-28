@@ -29,12 +29,13 @@ var (
 )
 
 var commitCmd = &cobra.Command{
-	Use:   "commit [summary]",
+	Use:   "commit [summary] [paths...]",
 	Short: "Create a conventional commit from staged or specified files",
 	Long: `Create a git commit with conventional commit formatting.
 
 Summary can be provided as a positional argument or via --message.
-Files are staged via --add flags, --all, or from the existing staging area.
+Paths can be provided as positional args (after summary or after --),
+via --add flags, --all, or from the existing staging area.
 
 In CI environments, the push refspec is auto-detected from CI_COMMIT_REF_NAME
 or CI_COMMIT_BRANCH. Use --refspec for explicit control.
@@ -42,10 +43,14 @@ or CI_COMMIT_BRANCH. Use --refspec for explicit control.
 Examples:
   stagefreight commit -t docs -m "refresh generated docs"
   stagefreight commit -t docs "refresh generated docs"
-  stagefreight commit -t fix -m "handle edge case"
-  stagefreight commit --dry-run -t docs -m "test" --add docs/
-  stagefreight commit -t docs -m "refresh docs" --push --refspec HEAD:refs/heads/main`,
-	Args: cobra.MaximumNArgs(1),
+  stagefreight commit -t feat "add api validation" src/api/ src/config/config.go
+  stagefreight commit -t fix -m "handle nil config" -- src/api/ src/config/config.go
+  stagefreight commit -t docs --add README.md -m "document commit flow" -- docs/ examples/
+  stagefreight commit --dry-run -t docs -m "test generated docs" --add docs/ -- README.md
+  stagefreight commit -t feat --breaking -m "replace auth middleware" -- src/auth/
+  stagefreight commit -t docs -m "refresh docs" --push --refspec HEAD:refs/heads/main
+  stagefreight commit -t feat -m "hotfix auth flow" --push --refspec HEAD:refs/heads/release/v1`,
+	Args: cobra.ArbitraryArgs,
 	RunE: runCommit,
 }
 
@@ -71,14 +76,18 @@ func runCommit(cmd *cobra.Command, args []string) error {
 	start := time.Now()
 	ctx := context.Background()
 
-	// Resolve summary: positional arg OR --message flag
+	// Resolve summary and positional paths.
+	// With -m: all positional args are paths.
+	// Without -m: first positional arg is summary, rest are paths.
 	summary := commitMessage
-	if len(args) > 0 {
-		if summary != "" {
-			return fmt.Errorf("cannot use both positional summary and --message flag")
-		}
+	var pathArgs []string
+	if summary != "" {
+		pathArgs = args
+	} else if len(args) > 0 {
 		summary = args[0]
+		pathArgs = args[1:]
 	}
+	commitAdd = append(commitAdd, pathArgs...)
 
 	rootDir, err := os.Getwd()
 	if err != nil {
