@@ -4,13 +4,9 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/PrPlanIT/StageFreight/src/ci"
 	"github.com/PrPlanIT/StageFreight/src/gitops"
-	"github.com/PrPlanIT/StageFreight/src/output"
-	"github.com/PrPlanIT/StageFreight/src/runtime"
 )
 
 var gitopsCmd = &cobra.Command{
@@ -210,84 +206,9 @@ func runGitopsImpact(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// runGitopsReconcile delegates to the universal reconcile command.
+// Kept for backward compatibility: `sf gitops reconcile` = `sf reconcile` when mode=gitops.
 func runGitopsReconcile(cmd *cobra.Command, args []string) error {
-	start := time.Now()
-	rootDir, err := os.Getwd()
-	if err != nil {
-		return fmt.Errorf("getting working directory: %w", err)
-	}
-
-	// Build runtime context — CLI is a thin shell, runtime owns orchestration.
-	ciCtx := ci.ResolveContext()
-	rctx := &runtime.RuntimeContext{
-		CI:       ciCtx,
-		Invoker:  runtime.DetectInvoker(ciCtx),
-		RepoRoot: rootDir,
-		DryRun:   reconcileDry,
-	}
-
-	// RunLifecycle: Resolve → Validate → Prepare → Plan → Execute → Cleanup.
-	if err := runtime.RunLifecycle(cmd.Context(), cfg, rctx); err != nil {
-		return err
-	}
-
-	// Report phase — runtime returns structured data, CLI renders it.
-	plan := rctx.Plan()
-	result := rctx.Result()
-
-	w := os.Stdout
-	color := output.UseColor()
-	sec := output.NewSection(w, "Reconcile", time.Since(start), color)
-
-	if plan == nil || len(plan.Actions) == 0 {
-		sec.Row("No affected kustomizations — nothing to reconcile.")
-		sec.Close()
-		return nil
-	}
-
-	succeeded := 0
-	failed := 0
-
-	for i, action := range plan.Actions {
-		status := "success"
-		suffix := ""
-
-		if rctx.DryRun {
-			suffix = " (dry-run)"
-		} else if result != nil && i < len(result.Actions) {
-			ar := result.Actions[i]
-			if !ar.Success {
-				status = "failed"
-				failed++
-			} else {
-				succeeded++
-			}
-			if ar.Duration > 0 {
-				suffix = fmt.Sprintf(" (%s)", ar.Duration.Truncate(100*time.Millisecond))
-			}
-		} else {
-			succeeded++
-		}
-
-		label := fmt.Sprintf("[%d/%d] %s", i+1, len(plan.Actions), action.Name)
-		output.RowStatus(sec, label, suffix, status, color)
-
-		if !rctx.DryRun && result != nil && i < len(result.Actions) && !result.Actions[i].Success && result.Actions[i].Message != "" {
-			fmt.Fprintf(w, "    │   %s\n", result.Actions[i].Message)
-		}
-	}
-
-	sec.Separator()
-	if rctx.DryRun {
-		sec.Row("%d actions planned (dry-run)", len(plan.Actions))
-	} else {
-		sec.Row("%d/%d succeeded", succeeded, len(plan.Actions))
-	}
-	sec.Close()
-
-	if failed > 0 {
-		return fmt.Errorf("%d/%d reconciliations failed", failed, len(plan.Actions))
-	}
-
-	return nil
+	reconcileGlobalDry = reconcileDry
+	return runReconcile(cmd, args)
 }
