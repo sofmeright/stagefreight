@@ -13,7 +13,7 @@ func RenderOverview(result *DiscoveryResult, commitSHA string) string {
 	var b strings.Builder
 
 	// Provenance header
-	b.WriteString(fmt.Sprintf("> Generated from live Kubernetes state\n"))
+	b.WriteString("> Generated from live Kubernetes state\n")
 	b.WriteString(fmt.Sprintf("> Cluster: %s | %s",
 		result.Cluster,
 		result.ObservedAt.UTC().Format("2006-01-02T15:04:05Z")))
@@ -64,8 +64,6 @@ func RenderOverview(result *DiscoveryResult, commitSHA string) string {
 
 // renderAppsByCategory groups apps by category and renders each as a table.
 func renderAppsByCategory(b *strings.Builder, apps []AppRecord) {
-	// Already sorted by category order + name.
-	// Group by category.
 	var currentCat string
 	for _, r := range apps {
 		if r.Category != currentCat {
