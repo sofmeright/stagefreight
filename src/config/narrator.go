@@ -174,6 +174,7 @@ var validNarratorItemKinds = map[string]bool{
 	"include":        true,
 	"props":          true,
 	"build-contents": true,
+	"k8s-inventory":  true,
 }
 
 // validPlacementModes enumerates all recognized placement modes.
