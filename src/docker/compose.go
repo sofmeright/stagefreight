@@ -216,7 +216,7 @@ func (c *ComposeBackend) Execute(ctx context.Context, plan *runtime.LifecyclePla
 		transport := c.resolveTransportForStack(meta)
 
 		start := time.Now()
-		err := deployStack(ctx, *stack, rctx.RepoRoot, c.secrets, transport)
+		execResult, err := deployStack(ctx, *stack, rctx.RepoRoot, c.secrets, transport)
 		ar := runtime.ActionResult{
 			Name:     pa.Name,
 			Duration: time.Since(start),
@@ -225,6 +225,7 @@ func (c *ComposeBackend) Execute(ctx context.Context, plan *runtime.LifecyclePla
 		if err != nil {
 			ar.Success = false
 			ar.Message = err.Error()
+			ar.Stderr = execResult.Stderr
 		} else {
 			ar.Success = true
 			ar.Message = "deployed"
@@ -266,20 +267,20 @@ func (c *ComposeBackend) resolveTransportForStack(meta DockerPlanMeta) HostTrans
 
 // deployStack builds a staged bundle and typed StackAction, then delegates to transport.
 // Backend owns staging. Transport owns execution. No coupling.
-func deployStack(ctx context.Context, stack StackInfo, rootDir string, secrets SecretsProvider, transport HostTransport) error {
+func deployStack(ctx context.Context, stack StackInfo, rootDir string, secrets SecretsProvider, transport HostTransport) (ExecResult, error) {
 	stackDir := filepath.Join(rootDir, stack.Path)
 
 	// Create local bundle staging dir.
 	bundleDir, err := os.MkdirTemp("", "sf-bundle-*")
 	if err != nil {
-		return fmt.Errorf("creating bundle dir: %w", err)
+		return ExecResult{}, fmt.Errorf("creating bundle dir: %w", err)
 	}
 	defer os.RemoveAll(bundleDir)
 
 	// Stage compose file into bundle.
 	if stack.ComposeFile != "" {
 		if err := copyFile(filepath.Join(stackDir, stack.ComposeFile), filepath.Join(bundleDir, stack.ComposeFile)); err != nil {
-			return fmt.Errorf("staging compose file: %w", err)
+			return ExecResult{}, fmt.Errorf("staging compose file: %w", err)
 		}
 	}
 
@@ -290,16 +291,16 @@ func deployStack(ctx context.Context, stack StackInfo, rootDir string, secrets S
 		if ef.Encrypted && secrets != nil {
 			data, err = secrets.Decrypt(ctx, ef.FullPath)
 			if err != nil {
-				return fmt.Errorf("decrypting %s: %w", ef.Path, err)
+				return ExecResult{}, fmt.Errorf("decrypting %s: %w", ef.Path, err)
 			}
 		} else {
 			data, err = os.ReadFile(ef.FullPath)
 			if err != nil {
-				return fmt.Errorf("reading %s: %w", ef.Path, err)
+				return ExecResult{}, fmt.Errorf("reading %s: %w", ef.Path, err)
 			}
 		}
 		if err := os.WriteFile(filepath.Join(bundleDir, ef.Path), data, 0600); err != nil {
-			return fmt.Errorf("staging %s: %w", ef.Path, err)
+			return ExecResult{}, fmt.Errorf("staging %s: %w", ef.Path, err)
 		}
 		envFiles = append(envFiles, ef.Path)
 	}
@@ -308,7 +309,7 @@ func deployStack(ctx context.Context, stack StackInfo, rootDir string, secrets S
 	var hooks []Hook
 	for _, s := range stack.Scripts {
 		if err := copyFile(filepath.Join(stackDir, s), filepath.Join(bundleDir, s)); err != nil {
-			return fmt.Errorf("staging %s: %w", s, err)
+			return ExecResult{}, fmt.Errorf("staging %s: %w", s, err)
 		}
 		phase := ""
 		switch s {
@@ -338,10 +339,10 @@ func deployStack(ctx context.Context, stack StackInfo, rootDir string, secrets S
 	// Delegate to transport.
 	result, err := transport.ExecuteAction(ctx, action)
 	if err != nil {
-		return fmt.Errorf("%s: %s", err, strings.TrimSpace(result.Stderr))
+		return result, fmt.Errorf("%s", err)
 	}
 
-	return nil
+	return result, nil
 }
 
 // copyFile copies a single file.

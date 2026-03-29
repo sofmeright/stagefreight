@@ -143,12 +143,42 @@ func RenderResult(w io.Writer, plan *runtime.LifecyclePlan, result *runtime.Life
 		label := fmt.Sprintf("[%d/%d] %s", i+1, len(result.Actions), stack)
 		output.RowStatus(sec, label, suffix, status, color)
 
-		if !ar.Success && ar.Message != "" {
-			fmt.Fprintf(w, "    │   %s\n", ar.Message)
+		if !ar.Success {
+			// Surface error summary.
+			if ar.Message != "" {
+				sec.Row("  %s", ar.Message)
+			}
+			// Surface stderr tail — same pattern as build failure visibility.
+			// Full stderr in ActionResult; renderer shows last 10 meaningful lines.
+			if ar.Stderr != "" {
+				renderStderrTail(sec, ar.Stderr)
+			}
 		}
 	}
 
 	sec.Separator()
 	sec.Row("%d/%d succeeded", succeeded, len(result.Actions))
 	sec.Close()
+}
+
+// renderStderrTail shows the last N non-empty lines of stderr in the section.
+// Matches build error visibility pattern from execute.go.
+func renderStderrTail(sec *output.Section, stderr string) {
+	errText := strings.TrimSpace(stderr)
+	if errText == "" {
+		return
+	}
+	lines := strings.Split(errText, "\n")
+	start := 0
+	if len(lines) > 10 {
+		start = len(lines) - 10
+		sec.Row("  ... (%d lines truncated)", start)
+	}
+	for _, line := range lines[start:] {
+		line = strings.TrimRight(line, "\r")
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		sec.Row("  %s", line)
+	}
 }

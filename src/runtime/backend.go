@@ -80,4 +80,5 @@ type ActionResult struct {
 	Success  bool
 	Duration time.Duration
 	Message  string
+	Stderr   string // raw stderr for failure visibility — renderer tails this
 }
