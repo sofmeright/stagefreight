@@ -171,6 +171,60 @@ type ServiceRuntimeState struct {
 	ContainerID string
 }
 
+// TrustLevel indicates how authoritative the repository discovery is.
+// Destructive actions require Authoritative. Uncertain → observe only.
+type TrustLevel string
+
+const (
+	TrustNone          TrustLevel = "none"
+	TrustPartial       TrustLevel = "partial"
+	TrustAuthoritative TrustLevel = "authoritative"
+)
+
+// TrustFailureReason is a typed, machine-meaningful reason for trust failure.
+type TrustFailureReason string
+
+const (
+	ReasonNoSentinel        TrustFailureReason = "no_sentinel"
+	ReasonIaCRootMissing    TrustFailureReason = "iac_root_missing"
+	ReasonScanFailed        TrustFailureReason = "scan_failed"
+	ReasonRepoMismatch      TrustFailureReason = "repo_identity_mismatch"
+	ReasonTargetNotDeclared TrustFailureReason = "target_not_declared"
+	ReasonLifecycleMismatch TrustFailureReason = "lifecycle_mode_mismatch"
+)
+
+// DiscoveryTrust captures whether the repo discovery is authoritative enough
+// for destructive operations (orphan cleanup, prune).
+// Never destroy from absence unless the source of truth is positively validated.
+type DiscoveryTrust struct {
+	Level             TrustLevel
+	Sentinel          bool                 // .stagefreight.yml exists
+	IaCRootExists     bool                 // expected IaC directory exists
+	ScanSucceeded     bool                 // scan completed without error
+	RepoIdentityMatch bool                 // origin URL matches expected
+	DeclaredTargets   bool                 // host resolution succeeded
+	StackCount        int                  // stacks discovered
+	Reasons           []TrustFailureReason // why trust failed
+}
+
+// DriftPolicy configures drift detection behavior.
+type DriftPolicy struct {
+	Tier2Action              string `yaml:"tier2_action"`               // report | reconcile
+	OrphanAction             string `yaml:"orphan_action"`              // report | down | prune
+	OrphanThreshold          int    `yaml:"orphan_threshold"`           // block if more than N orphans
+	PruneRequiresConfirmation bool  `yaml:"prune_requires_confirmation"` // require --force for prune
+}
+
+// DefaultDriftPolicy returns safe defaults.
+func DefaultDriftPolicy() DriftPolicy {
+	return DriftPolicy{
+		Tier2Action:               "report",
+		OrphanAction:              "report",
+		OrphanThreshold:           5,
+		PruneRequiresConfirmation: true,
+	}
+}
+
 // HashStamps tracks last-known hashes for drift detection.
 // Stored in .stagefreight-state.yml (git-tracked).
 type HashStamps struct {

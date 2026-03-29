@@ -14,6 +14,17 @@ type DockerLifecycleConfig struct {
 
 	// Secrets defines the secrets decryption provider.
 	Secrets DockerSecretsConfig `yaml:"secrets"`
+
+	// Drift defines drift detection and reconciliation policy.
+	Drift DockerDriftPolicy `yaml:"drift"`
+}
+
+// DockerDriftPolicy configures drift detection behavior.
+type DockerDriftPolicy struct {
+	Tier2Action               string `yaml:"tier2_action"`                // report | reconcile (default: report)
+	OrphanAction              string `yaml:"orphan_action"`               // report | down | prune (default: report)
+	OrphanThreshold           int    `yaml:"orphan_threshold"`            // block if more than N orphans (default: 5)
+	PruneRequiresConfirmation bool   `yaml:"prune_requires_confirmation"` // require --force for prune (default: true)
 }
 
 // DockerTargetsConfig defines target resolution for Docker reconciliation.
@@ -58,6 +69,12 @@ func DefaultDockerLifecycleConfig() DockerLifecycleConfig {
 		},
 		Secrets: DockerSecretsConfig{
 			Provider: "sops",
+		},
+		Drift: DockerDriftPolicy{
+			Tier2Action:               "report",
+			OrphanAction:              "report",
+			OrphanThreshold:           5,
+			PruneRequiresConfirmation: true,
 		},
 	}
 }

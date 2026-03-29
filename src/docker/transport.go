@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 )
@@ -107,6 +108,17 @@ func (l *LocalTransport) InspectStack(ctx context.Context, project string) (Stac
 	return inspectLocalContainers(ctx, l, project, ids)
 }
 
+// ListProjects returns all compose project names on the local host.
+func (l *LocalTransport) ListProjects(ctx context.Context) ([]string, error) {
+	r := l.execLocal(ctx, "docker", "ps", "-a",
+		"--filter", "label=com.docker.compose.project",
+		"--format", "{{index .Labels \"com.docker.compose.project\"}}")
+	if !r.Success {
+		return nil, fmt.Errorf("listing projects: %s", strings.TrimSpace(r.Stderr))
+	}
+	return dedupeLines(r.Stdout), nil
+}
+
 func (l *LocalTransport) Close() error { return nil }
 
 // SSHTransport executes stack actions on a remote host via SSH.
@@ -201,6 +213,17 @@ func (s *SSHTransport) InspectStack(ctx context.Context, project string) (StackI
 	}
 	ids := strings.Fields(strings.TrimSpace(psResult.Stdout))
 	return inspectRemoteContainers(ctx, s, project, ids)
+}
+
+// ListProjects returns all compose project names on the remote host.
+func (s *SSHTransport) ListProjects(ctx context.Context) ([]string, error) {
+	r := s.sshExecResult(ctx, "docker", "ps", "-a",
+		"--filter", "label=com.docker.compose.project",
+		"--format", "{{index .Labels \"com.docker.compose.project\"}}")
+	if !r.Success {
+		return nil, fmt.Errorf("listing projects: %s", strings.TrimSpace(r.Stderr))
+	}
+	return dedupeLines(r.Stdout), nil
 }
 
 func (s *SSHTransport) sshExec(ctx context.Context, cmd string, args ...string) (ExecResult, error) {
@@ -334,6 +357,8 @@ func composeArgs(action StackAction) []string {
 		args = append(args, "up", "-d")
 	case "down":
 		args = append(args, "down")
+	case "prune":
+		args = append(args, "down", "--volumes", "--remove-orphans")
 	case "restart":
 		args = append(args, "restart")
 	}
@@ -365,4 +390,19 @@ func ResolveTransport(target HostTarget) HostTransport {
 		User:    user,
 		KeyPath: keyPath,
 	}
+}
+
+// dedupeLines splits output by newlines, deduplicates, ignores empties.
+func dedupeLines(output string) []string {
+	seen := map[string]bool{}
+	var result []string
+	for _, line := range strings.Split(strings.TrimSpace(output), "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" && !seen[line] {
+			seen[line] = true
+			result = append(result, line)
+		}
+	}
+	sort.Strings(result)
+	return result
 }

@@ -177,6 +177,90 @@ func (c *ComposeBackend) Plan(ctx context.Context, cfg *config.Config, rctx *run
 	}
 	c.drifted = drifted
 
+	// Orphan detection: find compose projects running but not in IaC.
+	// Gated by repository trust — never destroy from absence without proof.
+	trust := EvaluateTrust(rctx.RepoRoot, dcfg.IaC.Path, cfg.Lifecycle.Mode)
+	trust.MarkScanResult(err == nil, len(stacks))
+	trust.MarkDeclaredTargets(len(c.targets) > 0)
+
+	// Build known project set from IaC stacks
+	knownProjects := map[string]bool{}
+	for _, stack := range stacks {
+		if stack.ComposeProject != "" {
+			knownProjects[stack.ComposeProject] = true
+		}
+	}
+
+	// Query running projects per target host
+	for _, target := range c.targets {
+		if target.Transport == nil {
+			continue
+		}
+		runningProjects, listErr := target.Transport.ListProjects(ctx)
+		if listErr != nil {
+			// Can't list projects — skip orphan detection for this host
+			continue
+		}
+
+		// Find orphans: running but not in IaC
+		var orphans []string
+		for _, proj := range runningProjects {
+			if !knownProjects[proj] {
+				orphans = append(orphans, proj)
+			}
+		}
+
+		if len(orphans) == 0 {
+			continue
+		}
+
+		// Apply trust gate + anomaly guards
+		orphanAction := dcfg.Drift.OrphanAction
+		if orphanAction == "" {
+			orphanAction = "report"
+		}
+
+		allowed, reason := AllowDestructiveOrphanAction(
+			trust,
+			len(knownProjects),
+			len(runningProjects),
+			len(orphans),
+			dcfg.Drift.OrphanThreshold,
+		)
+
+		if !allowed && orphanAction != "report" {
+			// Degrade destructive action to report
+			orphanAction = "report"
+		}
+
+		// Prune safety: require force flag
+		if orphanAction == "prune" && dcfg.Drift.PruneRequiresConfirmation {
+			orphanAction = "down" // degrade prune → down without force
+		}
+
+		for _, proj := range orphans {
+			order++
+			desc := "orphaned: running but not declared in IaC"
+			if !allowed {
+				desc = fmt.Sprintf("orphaned (blocked: %s)", reason)
+			}
+
+			meta := DockerPlanMeta{
+				Scope:     target.Name,
+				ScopeKind: "host",
+				Stack:     proj,
+			}
+
+			actions = append(actions, runtime.PlannedAction{
+				Name:        target.Name + "/" + proj,
+				Description: desc,
+				Order:       order,
+				Action:      orphanAction,
+				Metadata:    meta.ToMetadata(),
+			})
+		}
+	}
+
 	return &runtime.LifecyclePlan{
 		Mode:    "docker",
 		Backend: "compose",
@@ -197,62 +281,88 @@ func (c *ComposeBackend) Execute(ctx context.Context, plan *runtime.LifecyclePla
 		stackByKey[key] = &c.stacks[i]
 	}
 
-	// Execute only plan actions with Action == "up"
+	// Execute plan actions: "up" (deploy drifted), "down" (orphan removal), "prune" (orphan + volumes)
 	for _, pa := range plan.Actions {
-		if pa.Action != "up" {
+		if pa.Action == "noop" || pa.Action == "report" || pa.Action == "orphan" {
 			continue
 		}
 
-		stack, ok := stackByKey[pa.Name]
-		if !ok {
-			results = append(results, runtime.ActionResult{
-				Name:    pa.Name,
-				Success: false,
-				Message: "stack info not found in plan",
-			})
-			continue
-		}
-
-		// Resolve transport for this stack's target host.
 		meta := ParseDockerPlanMeta(pa.Metadata)
 		transport := c.resolveTransportForStack(meta)
 
-		start := time.Now()
-		execResult, err := deployStack(ctx, *stack, rctx.RepoRoot, c.secrets, transport)
-		ar := runtime.ActionResult{
-			Name:     pa.Name,
-			Duration: time.Since(start),
-		}
+		switch pa.Action {
+		case "up":
+			// Deploy drifted stack.
+			stack, ok := stackByKey[pa.Name]
+			if !ok {
+				results = append(results, runtime.ActionResult{
+					Name:    pa.Name,
+					Success: false,
+					Message: "stack info not found in plan",
+				})
+				continue
+			}
 
-		if err != nil {
-			ar.Success = false
-			ar.Message = err.Error()
-			ar.Stderr = execResult.Stderr
-		} else {
-			ar.Success = true
-			ar.Message = "deployed"
-			// Update hash stamps from typed plan metadata (not rediscovered).
-			meta := ParseDockerPlanMeta(pa.Metadata)
+			start := time.Now()
+			execResult, err := deployStack(ctx, *stack, rctx.RepoRoot, c.secrets, transport)
+			ar := runtime.ActionResult{
+				Name:     pa.Name,
+				Duration: time.Since(start),
+			}
 
-			// Capture runtime config hash post-deploy for Tier 2 drift baseline.
-			configHash := ""
-			if inspection, err := transport.InspectStack(ctx, stack.ComposeProject); err == nil {
-				for _, svc := range inspection.Services {
-					if svc.ConfigHash != "" {
-						configHash = svc.ConfigHash
-						break
+			if err != nil {
+				ar.Success = false
+				ar.Message = err.Error()
+				ar.Stderr = execResult.Stderr
+			} else {
+				ar.Success = true
+				ar.Message = "deployed"
+
+				// Capture runtime config hash post-deploy for Tier 2 baseline.
+				configHash := ""
+				if inspection, err := transport.InspectStack(ctx, stack.ComposeProject); err == nil {
+					for _, svc := range inspection.Services {
+						if svc.ConfigHash != "" {
+							configHash = svc.ConfigHash
+							break
+						}
 					}
 				}
-			}
 
-			c.stamps.Stacks[pa.Name] = StackStamp{
-				BundleHash: meta.BundleHash,
-				ConfigHash: configHash,
-				DeployedAt: time.Now(),
+				c.stamps.Stacks[pa.Name] = StackStamp{
+					BundleHash: meta.BundleHash,
+					ConfigHash: configHash,
+					DeployedAt: time.Now(),
+				}
 			}
+			results = append(results, ar)
+
+		case "down", "prune":
+			// Remove orphaned compose project via transport.
+			start := time.Now()
+			downAction := StackAction{
+				Target:      meta.Scope,
+				Stack:       pa.Name,
+				Action:      pa.Action,
+				ProjectName: meta.Stack,
+			}
+			execResult, err := transport.ExecuteAction(ctx, downAction)
+			ar := runtime.ActionResult{
+				Name:     pa.Name,
+				Duration: time.Since(start),
+			}
+			if err != nil {
+				ar.Success = false
+				ar.Message = err.Error()
+				ar.Stderr = execResult.Stderr
+			} else {
+				ar.Success = true
+				ar.Message = pa.Action + "ed"
+				// Remove from stamps
+				delete(c.stamps.Stacks, pa.Name)
+			}
+			results = append(results, ar)
 		}
-
-		results = append(results, ar)
 	}
 
 	// Save updated stamps

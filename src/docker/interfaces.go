@@ -27,5 +27,8 @@ type HostTransport interface {
 	// Read-only. Returns structured runtime facts, not CLI output.
 	// Selects containers by Compose project label, not name.
 	InspectStack(ctx context.Context, project string) (StackInspection, error)
+	// ListProjects returns all compose project names running on this host.
+	// Uses -a to include stopped containers (stopped = still logically exists).
+	ListProjects(ctx context.Context) ([]string, error)
 	Close() error
 }
