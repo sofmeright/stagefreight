@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/PrPlanIT/StageFreight/src/config"
+	"github.com/PrPlanIT/StageFreight/src/diag"
 )
 
 // HandoffDecision describes the outcome of a handoff evaluation.
@@ -124,12 +125,12 @@ func IsBranchHeadFresh(ciCtx *CIContext) bool {
 
 	headSHA := resolveRemoteHead(ciCtx.Branch)
 	if headSHA == "" {
-		fmt.Fprintf(os.Stderr, "  freshness: remote lookup failed (branch=%s), allowing execution\n", ciCtx.Branch)
+		diag.Warn("freshness: remote lookup failed (branch=%s), allowing execution", ciCtx.Branch)
 		return true // can't resolve, fail open
 	}
 
 	fresh := headSHA == ciCtx.SHA
-	fmt.Fprintf(os.Stderr, "  freshness: branch=%s local=%s remote=%s fresh=%t\n",
+	diag.Debug(true, "freshness: branch=%s local=%s remote=%s fresh=%t",
 		ciCtx.Branch, shortSHA(ciCtx.SHA), shortSHA(headSHA), fresh)
 	return fresh
 }
