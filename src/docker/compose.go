@@ -123,7 +123,8 @@ func (c *ComposeBackend) Plan(ctx context.Context, cfg *config.Config, rctx *run
 	}
 	c.stamps = stamps
 
-	// Compute drift per stack
+	// Compute drift per stack — include ALL stacks in plan (noop + drifted).
+	// Plan is the complete picture; execute consumes only drifted actions.
 	var actions []runtime.PlannedAction
 	var drifted []DriftResult
 	order := 0
@@ -135,15 +136,30 @@ func (c *ComposeBackend) Plan(ctx context.Context, cfg *config.Config, rctx *run
 		}
 
 		dr := DetectDrift(stack, rctx.RepoRoot, stamps, c.secrets)
+		order++
+
+		action := "noop"
 		if dr.Drifted {
-			order++
-			actions = append(actions, runtime.PlannedAction{
-				Name:        dr.Stack,
-				Description: dr.Reason,
-				Order:       order,
-			})
+			action = "up"
 			drifted = append(drifted, dr)
 		}
+
+		actions = append(actions, runtime.PlannedAction{
+			Name:        dr.Stack,
+			Description: dr.Reason,
+			Order:       order,
+			Action:      action,
+			Metadata: map[string]string{
+				"scope":       stack.Scope,
+				"scope_kind":  stack.ScopeKind,
+				"stack":       stack.Name,
+				"path":        stack.Path,
+				"bundle_hash": dr.BundleHash,
+				"stored_hash": dr.StoredHash,
+				"drift_tier":  fmt.Sprintf("%d", dr.Tier),
+				"deploy_kind": stack.DeployKind,
+			},
+		})
 	}
 	c.drifted = drifted
 
@@ -154,25 +170,31 @@ func (c *ComposeBackend) Plan(ctx context.Context, cfg *config.Config, rctx *run
 	}, nil
 }
 
-// Execute deploys drifted stacks. Idempotent: no drift → no action.
+// Execute consumes the plan — applies only actions marked "up".
+// Does NOT rediscover state. Plan decides; execute applies.
+// Idempotent: no drifted actions → no mutations.
 func (c *ComposeBackend) Execute(ctx context.Context, plan *runtime.LifecyclePlan, rctx *runtime.RuntimeContext) (*runtime.LifecycleResult, error) {
 	var results []runtime.ActionResult
 
-	for _, dr := range c.drifted {
-		// Find the stack info
-		var stack *StackInfo
-		for i := range c.stacks {
-			key := c.stacks[i].Scope + "/" + c.stacks[i].Name
-			if key == dr.Stack {
-				stack = &c.stacks[i]
-				break
-			}
+	// Build stack lookup
+	stackByKey := map[string]*StackInfo{}
+	for i := range c.stacks {
+		key := c.stacks[i].Scope + "/" + c.stacks[i].Name
+		stackByKey[key] = &c.stacks[i]
+	}
+
+	// Execute only plan actions with Action == "up"
+	for _, pa := range plan.Actions {
+		if pa.Action != "up" {
+			continue
 		}
-		if stack == nil {
+
+		stack, ok := stackByKey[pa.Name]
+		if !ok {
 			results = append(results, runtime.ActionResult{
-				Name:    dr.Stack,
+				Name:    pa.Name,
 				Success: false,
-				Message: "stack info not found",
+				Message: "stack info not found in plan",
 			})
 			continue
 		}
@@ -180,7 +202,7 @@ func (c *ComposeBackend) Execute(ctx context.Context, plan *runtime.LifecyclePla
 		start := time.Now()
 		err := deployStack(ctx, *stack, rctx.RepoRoot, c.secrets)
 		ar := runtime.ActionResult{
-			Name:     dr.Stack,
+			Name:     pa.Name,
 			Duration: time.Since(start),
 		}
 
@@ -190,9 +212,10 @@ func (c *ComposeBackend) Execute(ctx context.Context, plan *runtime.LifecyclePla
 		} else {
 			ar.Success = true
 			ar.Message = "deployed"
-			// Update hash stamps
-			c.stamps.Stacks[dr.Stack] = StackStamp{
-				BundleHash: dr.BundleHash,
+			// Update hash stamps from plan metadata (not rediscovered)
+			bundleHash := pa.Metadata["bundle_hash"]
+			c.stamps.Stacks[pa.Name] = StackStamp{
+				BundleHash: bundleHash,
 				DeployedAt: time.Now(),
 			}
 		}

@@ -62,9 +62,11 @@ type LifecyclePlan struct {
 
 // PlannedAction describes a single action to be executed.
 type PlannedAction struct {
-	Name        string // e.g. "reconcile flux-system/infrastructure"
-	Description string
+	Name        string // e.g. "reconcile flux-system/infrastructure" or "anchorage/grafana"
+	Description string // human-readable reason (e.g. "IaC files changed since last deployment")
 	Order       int
+	Action      string            // intended action: "reconcile", "up", "noop", "error"
+	Metadata    map[string]string // backend-specific detail (host, hash, drift tier, etc.)
 }
 
 // LifecycleResult is the output of the Execute phase.
