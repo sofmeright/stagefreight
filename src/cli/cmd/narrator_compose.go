@@ -95,7 +95,10 @@ func runNarratorCompose(cmd *cobra.Command, args []string) error {
 	}
 
 	// Build modules using v2 kind-based dispatch.
-	modules := buildModulesV2(cfg, items, linkBase, rawBase, vi, rootDir)
+	modules, modErr := buildModulesV2(cfg, items, linkBase, rawBase, vi, rootDir)
+	if modErr != nil {
+		return fmt.Errorf("narrator compose: %w", modErr)
+	}
 	if len(modules) == 0 {
 		return fmt.Errorf("no valid modules produced from arguments")
 	}

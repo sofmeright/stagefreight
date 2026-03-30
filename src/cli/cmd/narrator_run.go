@@ -201,7 +201,7 @@ func processNarratorFile(appCfg *config.Config, fileCfg config.NarratorFile, roo
 		// Build modules from items in this group.
 		modules, modErr := buildModulesV2(appCfg, group.Items, linkBase, rawBase, vi, rootDir)
 		if modErr != nil {
-			return fmt.Errorf("narrator: %w", modErr)
+			return narratorFileResult{}, "", fmt.Errorf("narrator: %w", modErr)
 		}
 		if len(modules) == 0 {
 			continue
