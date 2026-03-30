@@ -143,11 +143,10 @@ func ReconcileLifecycle(manifest *InventoryManifest, activeApps []AppRecord, dis
 			// Check if image digests changed → invalidate enrichment cache.
 			newObserved := buildObserved(app)
 			if digestsChanged(entry.Observed.ImageDigests, newObserved.ImageDigests) {
-				staleNow := now
 				entry.IdentityCacheStatus = CacheStatus{
-					State:          "stale",
-					Reason:         "image_digest_changed",
-					LastAttemptedAt: &staleNow,
+					State:  "stale",
+					Reason: "image_digest_changed",
+					// LastAttemptedAt stays nil — this is invalidation, not an enrichment attempt.
 				}
 				changed = true
 			}
@@ -261,6 +260,7 @@ func SaveManifest(repoRoot, clusterName string, manifest *InventoryManifest) err
 	path := inventoryPath(repoRoot, clusterName)
 
 	// Sort app keys for deterministic output. Go maps are unordered.
+	// Use a wrapper to avoid mutating the in-memory manifest.
 	sortedApps := make(map[string]AppManifest)
 	keys := make([]string, 0, len(manifest.Apps))
 	for k := range manifest.Apps {
@@ -270,9 +270,10 @@ func SaveManifest(repoRoot, clusterName string, manifest *InventoryManifest) err
 	for _, k := range keys {
 		sortedApps[k] = manifest.Apps[k]
 	}
-	manifest.Apps = sortedApps
 
-	data, err := json.MarshalIndent(manifest, "", "  ")
+	output := *manifest
+	output.Apps = sortedApps
+	data, err := json.MarshalIndent(&output, "", "  ")
 	if err != nil {
 		return err
 	}
