@@ -110,7 +110,7 @@ targets:
     credentials: DOCKER
     when: { branches: [main], events: [push, tag] }
     file: "README.md"
-    description: "Declarative CI/CD CLI — detect, build, scan, and release container images from one manifest"
+    description: "A declarative lifecycle runtime — GitOps, Kubernetes, Docker, and CI ecosystems from one manifest"
     link_base: "https://github.com/{var:github_org}/{var:github_repo}/blob/main"
 
   # ── GitLab component catalog ─────────────────────────────────────
@@ -126,62 +126,112 @@ targets:
     aliases: ["v{version}", "latest"]
     when: { git_tags: [stable], events: [tag] }
 
+badges:
+  - id: build
+    text: build
+    value: "{env:BUILD_STATUS}"
+    color: auto
+    font: monofur
+    output: ".stagefreight/badges/build.svg"
+    link: "https://gitlab.prplanit.com/{var:gitlab_group}/{var:repo}/-/pipelines"
+  - id: license
+    text: license
+    value: "AGPL-3.0-only"
+    color: "#310937"
+    font: monofur
+    output: ".stagefreight/badges/license.svg"
+    link: LICENSE
+  - id: release
+    text: release
+    value: "v{base}"
+    color: "#74ecbe"
+    font: dejavu-sans
+    font_size: 11
+    output: ".stagefreight/badges/release.svg"
+    link: "https://github.com/{var:github_org}/{var:github_repo}/releases"
+  - id: updated
+    text: updated
+    value: "{env:BUILD_DATE}"
+    color: "#236144"
+    font: dejavu-sans
+    font_size: 11
+    output: ".stagefreight/badges/updated.svg"
+  - id: pulls
+    text: pulls
+    value: "{docker.pulls}"
+    color: "#1d63ed"
+    output: ".stagefreight/badges/pulls.svg"
+    link: "https://hub.docker.com/r/{var:org}/{var:repo}"
+  - id: release-latest
+    text: latest
+    value: "v{base}"
+    color: "#74ecbe"
+    output: ".stagefreight/badges/latest.svg"
+    link: "https://hub.docker.com/r/{var:org}/{var:repo}/tags?name=latest"
+  - id: release-updated
+    text: updated
+    value: "{docker.tag.v{base}.updated}"
+    color: "#236144"
+    output: ".stagefreight/badges/release-updated.svg"
+  - id: release-size
+    text: size
+    value: "{docker.tag.v{base}.size}"
+    color: "#555"
+    output: ".stagefreight/badges/release-size.svg"
+    link: "https://hub.docker.com/r/{var:org}/{var:repo}/tags?name=v{base}"
+  - id: dev-latest
+    text: latest-dev
+    value: "dev-{sha:8}"
+    color: "#3b82f6"
+    output: ".stagefreight/badges/latest-dev.svg"
+    link: "https://hub.docker.com/r/{var:org}/{var:repo}/tags?name=latest-dev"
+  - id: dev-updated
+    text: updated
+    value: "{docker.tag.latest-dev.updated}"
+    color: "#236144"
+    output: ".stagefreight/badges/dev-updated.svg"
+  - id: dev-size
+    text: size
+    value: "{docker.tag.latest-dev.size}"
+    color: "#555"
+    output: ".stagefreight/badges/dev-size.svg"
+    link: "https://hub.docker.com/r/{var:org}/{var:repo}/tags?name=latest-dev"
+
 narrator:
   - file: "README.md"
     link_base: "https://github.com/{var:github_org}/{var:github_repo}/blob/main"
     items:
       - id: badge.build
-        kind: badge
+        kind: badge_ref
+        ref: build
         placement:
           between: ["<!-- sf:badges:start -->", "<!-- sf:badges:end -->"]
           mode: replace
           inline: true
-        text: build
-        value: "{env:BUILD_STATUS}"
-        color: auto
-        font: monofur
-        output: ".stagefreight/badges/build.svg"
-        link: "https://gitlab.prplanit.com/{var:gitlab_group}/{var:repo}/-/pipelines"
 
       - id: badge.license
-        kind: badge
+        kind: badge_ref
+        ref: license
         placement:
           between: ["<!-- sf:badges:start -->", "<!-- sf:badges:end -->"]
           mode: replace
           inline: true
-        text: license
-        value: "AGPL-3.0-only"
-        color: "#310937"
-        font: monofur
-        output: ".stagefreight/badges/license.svg"
-        link: LICENSE
 
       - id: badge.release
-        kind: badge
+        kind: badge_ref
+        ref: release
         placement:
           between: ["<!-- sf:badges:start -->", "<!-- sf:badges:end -->"]
           mode: replace
           inline: true
-        text: release
-        value: "v{base}"
-        color: "#74ecbe"
-        font: dejavu-sans
-        font_size: 11
-        output: ".stagefreight/badges/release.svg"
-        link: "https://github.com/{var:github_org}/{var:github_repo}/releases"
 
       - id: badge.updated
-        kind: badge
+        kind: badge_ref
+        ref: updated
         placement:
           between: ["<!-- sf:badges:start -->", "<!-- sf:badges:end -->"]
           mode: replace
           inline: true
-        text: updated
-        value: "{env:BUILD_DATE}"
-        color: "#236144"
-        font: dejavu-sans
-        font_size: 11
-        output: ".stagefreight/badges/updated.svg"
 
       - id: shield.donate
         kind: shield
@@ -289,15 +339,11 @@ narrator:
         link: "https://hub.docker.com/r/{var:org}/{var:repo}"
 
       - id: image.pulls
-        kind: badge
+        kind: badge_ref
+        ref: pulls
         placement:
           between: ["<!-- sf:image:start -->", "<!-- sf:image:end -->"]
           mode: replace
-        text: pulls
-        value: "{docker.pulls}"
-        color: "#1d63ed"
-        output: ".stagefreight/badges/pulls.svg"
-        link: "https://hub.docker.com/r/{var:org}/{var:repo}"
 
       - id: image.break1
         kind: break
@@ -307,69 +353,47 @@ narrator:
 
       # Row 2: All tag badges (release + dev)
       - id: image.release-latest
-        kind: badge
+        kind: badge_ref
+        ref: release-latest
         placement:
           between: ["<!-- sf:image:start -->", "<!-- sf:image:end -->"]
           mode: replace
-        text: latest
-        value: "v{base}"
-        color: "#74ecbe"
-        output: ".stagefreight/badges/latest.svg"
-        link: "https://hub.docker.com/r/{var:org}/{var:repo}/tags?name=latest"
 
       - id: image.release-updated
-        kind: badge
+        kind: badge_ref
+        ref: release-updated
         placement:
           between: ["<!-- sf:image:start -->", "<!-- sf:image:end -->"]
           mode: replace
-        text: updated
-        value: "{docker.tag.v{base}.updated}"
-        color: "#236144"
-        output: ".stagefreight/badges/release-updated.svg"
 
       - id: image.release-size
-        kind: badge
+        kind: badge_ref
+        ref: release-size
         placement:
           between: ["<!-- sf:image:start -->", "<!-- sf:image:end -->"]
           mode: replace
-        text: size
-        value: "{docker.tag.v{base}.size}"
-        color: "#555"
-        output: ".stagefreight/badges/release-size.svg"
-        link: "https://hub.docker.com/r/{var:org}/{var:repo}/tags?name=v{base}"
 
       # Dev badges (same row)
       - id: image.dev-latest
-        kind: badge
+        kind: badge_ref
+        ref: dev-latest
         placement:
           between: ["<!-- sf:image:start -->", "<!-- sf:image:end -->"]
           mode: replace
-        text: latest-dev
-        value: "dev-{sha:8}"
-        color: "#3b82f6"
-        output: ".stagefreight/badges/latest-dev.svg"
-        link: "https://hub.docker.com/r/{var:org}/{var:repo}/tags?name=latest-dev"
 
       - id: image.dev-updated
-        kind: badge
+        kind: badge_ref
+        ref: dev-updated
         placement:
           between: ["<!-- sf:image:start -->", "<!-- sf:image:end -->"]
           mode: replace
-        text: updated
-        value: "{docker.tag.latest-dev.updated}"
-        color: "#236144"
-        output: ".stagefreight/badges/dev-updated.svg"
 
       - id: image.dev-size
-        kind: badge
+        kind: badge_ref
+        ref: dev-size
         placement:
           between: ["<!-- sf:image:start -->", "<!-- sf:image:end -->"]
           mode: replace
-        text: size
-        value: "{docker.tag.latest-dev.size}"
-        color: "#555"
-        output: ".stagefreight/badges/dev-size.svg"
-        link: "https://hub.docker.com/r/{var:org}/{var:repo}/tags?name=latest-dev"
 
       # ── Image contents (from manifest inventory) ──────────────────
       - id: contents.base
