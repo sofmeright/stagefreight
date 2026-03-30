@@ -197,6 +197,29 @@ func Validate(cfg *Config) (warnings []string, err error) {
 		errs = append(errs, werrs...)
 	}
 
+	// ── Badges ───────────────────────────────────────────────────────────
+
+	badgeIDs := make(map[string]bool)
+	for i, b := range cfg.Badges {
+		bpath := fmt.Sprintf("badges[%d]", i)
+		if b.ID == "" {
+			errs = append(errs, fmt.Sprintf("%s: id is required", bpath))
+		} else if badgeIDs[b.ID] {
+			errs = append(errs, fmt.Sprintf("%s: duplicate badge id %q", bpath, b.ID))
+		} else {
+			badgeIDs[b.ID] = true
+		}
+		if b.Output == "" {
+			errs = append(errs, fmt.Sprintf("%s: output is required", bpath))
+		}
+		if b.Value == "" {
+			errs = append(errs, fmt.Sprintf("%s: value is required", bpath))
+		}
+		if b.Text == "" {
+			errs = append(errs, fmt.Sprintf("%s: text is required", bpath))
+		}
+	}
+
 	// ── Narrator ──────────────────────────────────────────────────────────
 
 	for fi, f := range cfg.Narrator {

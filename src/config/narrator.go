@@ -120,6 +120,13 @@ type NarratorItem struct {
 	// CatalogPath is the path to a catalog metadata file (kind: k8s-inventory).
 	// Optional — provides descriptions, friendly names, graveyard, tier overrides.
 	CatalogPath string `yaml:"catalog,omitempty"`
+
+	// ── kind: badge_ref ─────────────────────────────────────────────────
+
+	// Ref is the badge ID to reference (kind: badge_ref).
+	// Must match an ID defined in the top-level badges: config.
+	// Narrator does NOT own badge generation — only composition.
+	Ref string `yaml:"ref,omitempty"`
 }
 
 // HasGeneration returns true if this badge item should trigger SVG generation.
@@ -175,6 +182,7 @@ var validNarratorItemKinds = map[string]bool{
 	"props":          true,
 	"build-contents": true,
 	"k8s-inventory":  true,
+	"badge_ref":      true,
 }
 
 // validPlacementModes enumerates all recognized placement modes.

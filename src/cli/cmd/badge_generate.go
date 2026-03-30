@@ -129,11 +129,32 @@ func generateConfigBadges(eng *badge.Engine, names []string) error {
 func generateConfigBadgesImpl(eng *badge.Engine, appCfg *config.Config, rootDir string, names []string, status string) error {
 	start := time.Now()
 
-	// Collect all narrator items that have badge generation capability (kind: badge + output set)
+	// Collect badge items from both sources:
+	// 1. Top-level badges: config (new, preferred)
+	// 2. Narrator badge items with output (legacy, backward compat)
 	items := postbuild.CollectNarratorBadgeItems(appCfg)
 
+	// Add badges from top-level config (sorted by ID for deterministic generation).
+	if len(appCfg.Badges) > 0 {
+		sorted := make([]config.BadgeConfig, len(appCfg.Badges))
+		copy(sorted, appCfg.Badges)
+		sort.Slice(sorted, func(i, j int) bool { return sorted[i].ID < sorted[j].ID })
+		for _, b := range sorted {
+			items = append(items, config.NarratorItem{
+				ID:     b.ID,
+				Kind:   "badge",
+				Text:   b.Text,
+				Value:  b.Value,
+				Color:  b.Color,
+				Output: b.Output,
+				Link:   b.Link,
+				Font:   b.Font,
+			})
+		}
+	}
+
 	if len(items) == 0 {
-		return fmt.Errorf("no badge items with generation configured in narrator")
+		return fmt.Errorf("no badge items configured (check badges: or narrator badge items)")
 	}
 
 	// Filter to named items if specified

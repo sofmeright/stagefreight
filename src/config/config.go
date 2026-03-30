@@ -38,6 +38,10 @@ type Config struct {
 	// Targets defines distribution targets and side-effects.
 	Targets []TargetConfig `yaml:"targets"`
 
+	// Badges defines badge artifact generation (SVGs).
+	// Badge system owns definitions; narrator references them via badge_ref.
+	Badges []BadgeConfig `yaml:"badges"`
+
 	// Narrator defines content composition for file targets.
 	Narrator []NarratorFile `yaml:"narrator"`
 

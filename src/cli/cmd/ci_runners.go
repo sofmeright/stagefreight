@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"sort"
 	"strings"
 	"time"
@@ -496,6 +497,14 @@ func docsRunner(ctx context.Context, appCfg *config.Config, ciCtx *ci.CIContext,
 		return nil
 	}
 
+	// Loop prevention: if the current commit was created by StageFreight's docs subsystem,
+	// do not re-run docs. StageFreight recognizes its own output.
+	// This is intelligence, not [skip ci] suppression.
+	if isDocsAutoCommit(appCfg, ciCtx) {
+		fmt.Println("  docs: skipping — current commit is a StageFreight docs auto-commit")
+		return nil
+	}
+
 	rootDir := resolveWorkspace(ciCtx)
 	gen := appCfg.Docs.Generators
 
@@ -530,6 +539,7 @@ func docsRunner(ctx context.Context, appCfg *config.Config, ciCtx *ci.CIContext,
 		if _, err := autoCommitViaPlanner(ctx, appCfg, rootDir, commit.PlannerOptions{
 			Type:    appCfg.Docs.Commit.Type,
 			Message: appCfg.Docs.Commit.Message,
+			Body:    "Narrator: StageFreight\nCue: docs/narrator",
 			Paths:   appCfg.Docs.Commit.Add,
 			SkipCI:  boolPtr(appCfg.Docs.Commit.SkipCI),
 			Push:    boolPtr(appCfg.Docs.Commit.Push),
@@ -543,6 +553,35 @@ func docsRunner(ctx context.Context, appCfg *config.Config, ciCtx *ci.CIContext,
 	syncMirrors(ctx, appCfg, nil)
 
 	return nil
+}
+
+// isDocsAutoCommit detects if the current commit was created by StageFreight's docs subsystem.
+// Uses Cue trailer for deterministic detection — not fuzzy message matching.
+// Secondary guard (belt + suspenders). Primary loop prevention is deterministic output.
+func isDocsAutoCommit(appCfg *config.Config, ciCtx *ci.CIContext) bool {
+	workspace := resolveWorkspace(ciCtx)
+	body := gitCommitBody(workspace, "HEAD")
+	return hasTrailer(body, "Cue", "docs/narrator")
+}
+
+func gitCommitBody(repoDir, rev string) string {
+	cmd := exec.Command("git", "log", "-1", "--format=%B", rev)
+	cmd.Dir = repoDir
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func hasTrailer(body, key, value string) bool {
+	target := key + ": " + value
+	for _, line := range strings.Split(body, "\n") {
+		if strings.TrimSpace(line) == target {
+			return true
+		}
+	}
+	return false
 }
 
 // ── release runner ───────────────────────────────────────────────────────────

@@ -199,7 +199,10 @@ func processNarratorFile(appCfg *config.Config, fileCfg config.NarratorFile, roo
 
 	for _, group := range groups {
 		// Build modules from items in this group.
-		modules := buildModulesV2(appCfg, group.Items, linkBase, rawBase, vi, rootDir)
+		modules, modErr := buildModulesV2(appCfg, group.Items, linkBase, rawBase, vi, rootDir)
+		if modErr != nil {
+			return fmt.Errorf("narrator: %w", modErr)
+		}
 		if len(modules) == 0 {
 			continue
 		}
@@ -277,8 +280,15 @@ func groupItemsByPlacement(items []config.NarratorItem) []placementGroup {
 
 // buildModulesV2 converts v2 NarratorItem entries into narrator.Module instances.
 // Dispatches on item.Kind instead of checking which field is set.
-func buildModulesV2(appCfg *config.Config, items []config.NarratorItem, linkBase, rawBase string, vi *gitver.VersionInfo, rootDir string) []narrator.Module {
+func buildModulesV2(appCfg *config.Config, items []config.NarratorItem, linkBase, rawBase string, vi *gitver.VersionInfo, rootDir string) ([]narrator.Module, error) {
 	var modules []narrator.Module
+
+	// Build badge lookup map for badge_ref resolution.
+	// Map enforces uniqueness and O(1) lookup.
+	badgeMap := make(map[string]config.BadgeConfig, len(appCfg.Badges))
+	for _, b := range appCfg.Badges {
+		badgeMap[b.ID] = b
+	}
 
 	for _, item := range items {
 		switch item.Kind {
@@ -296,6 +306,34 @@ func buildModulesV2(appCfg *config.Config, items []config.NarratorItem, linkBase
 			if mod != nil {
 				modules = append(modules, mod)
 			}
+
+		case "badge_ref":
+			// Resolve badge by ID from top-level badges config.
+			// Narrator does NOT own badge generation — only composition.
+			// HARD FAIL if badge not found or unresolvable — never silent skip.
+			badgeCfg, ok := badgeMap[item.Ref]
+			if !ok {
+				return nil, fmt.Errorf("badge_ref %q not found in badges config", item.Ref)
+			}
+			if badgeCfg.Output == "" {
+				return nil, fmt.Errorf("badge_ref %q has no output path", item.Ref)
+			}
+			imgURL := ""
+			if rawBase != "" {
+				imgURL = rawBase + "/" + strings.TrimPrefix(badgeCfg.Output, "./")
+			}
+			if imgURL == "" {
+				return nil, fmt.Errorf("badge_ref %q has no resolvable image URL (rawBase empty)", item.Ref)
+			}
+			link := badgeCfg.Link
+			if link != "" {
+				link = resolveLink(link, linkBase)
+			}
+			modules = append(modules, narrator.BadgeModule{
+				Alt:    badgeCfg.Text,
+				ImgURL: imgURL,
+				Link:   link,
+			})
 
 		case "shield":
 			shieldPath := gitver.ResolveVarsShields(item.Shield, appCfg.Vars)
@@ -396,8 +434,9 @@ func buildModulesV2(appCfg *config.Config, items []config.NarratorItem, linkBase
 		}
 	}
 
-	return modules
+	return modules, nil
 }
+
 
 // resolveBadgeItemV2 resolves a v2 badge NarratorItem to a BadgeModule for markdown composition.
 // Uses the badge's Output path (SVG file) with rawBase to construct the image URL.
