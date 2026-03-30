@@ -2,7 +2,7 @@
 
 ## Command Index
 
-- [`stagefreight`](#cli-stagefreight) — DevOps automation CLI
+- [`stagefreight`](#cli-stagefreight) — Declarative lifecycle runtime — there's a setting for every stage, this is theatre!
 - [`stagefreight badge`](#cli-stagefreight-badge) — Badge generation commands
 - [`stagefreight badge generate`](#cli-stagefreight-badge-generate) — Generate SVG badges from config or flags
 - [`stagefreight build`](#cli-stagefreight-build) — Build artifacts (binaries, images)
@@ -63,7 +63,7 @@
 
 **Usage:** `stagefreight stagefreight`
 
-StageFreight — cache-aware, delta-only code quality and CI/CD automation.
+StageFreight — a declarative lifecycle runtime that governs Git as the source of truth, enforcing operator-defined intent across GitOps workflows, Kubernetes, Docker, and CI ecosystems.
 
 **Flags:**
 
