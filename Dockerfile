@@ -29,7 +29,7 @@ FROM docker.io/library/alpine:3.23.3
 
 LABEL maintainer="PrPlanIT <precisionplanit@gmail.com>" \
       org.opencontainers.image.title="StageFreight" \
-      org.opencontainers.image.description="Declarative CI/CD automation CLI — detect, build, scan, and release container images from a single manifest." \
+      org.opencontainers.image.description="A declarative lifecycle runtime that governs Git as the source of truth, enforcing operator-defined intent across GitOps workflows, Kubernetes, Docker, and CI ecosystems." \
       org.opencontainers.image.source="https://github.com/PrPlanIT/StageFreight" \
       org.opencontainers.image.url="https://hub.docker.com/r/prplanit/stagefreight" \
       org.opencontainers.image.documentation="https://github.com/PrPlanIT/StageFreight#readme" \

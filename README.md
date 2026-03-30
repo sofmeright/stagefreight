@@ -4,9 +4,9 @@
 
 # StageFreight
 
-> *Hello World's a Stage*
+> *If the world's a stage, give it a pipeline.*
 
-A declarative CI/CD automation CLI that detects, builds, scans, and releases container images across forges and registries — from a single manifest. StageFreight is open-source, self-building, and replaces fragile shell-script CI pipelines with a single Go binary driven by one [`.stagefreight.yml`](.stagefreight.yml) file.
+A declarative lifecycle runtime that governs Git as the source of truth, enforcing operator-defined intent across GitOps workflows, Kubernetes, Docker, and CI ecosystems. StageFreight is open-source, self-building, and replaces fragile shell-script CI pipelines with a single Go binary driven by one [`.stagefreight.yml`](.stagefreight.yml) file. There's a setting for every stage — this is theatre.
 
 <!-- sf:project:start -->
 [![badge/GitHub-source-181717?logo=github](https://img.shields.io/badge/GitHub-source-181717?logo=github)](https://github.com/PrPlanIT/StageFreight) [![badge/GitLab-source-FC6D26?logo=gitlab](https://img.shields.io/badge/GitLab-source-FC6D26?logo=gitlab)](https://gitlab.prplanit.com/PrPlanIT/stagefreight) [![Go Report Card](https://goreportcard.com/badge/github.com/PrPlanIT/StageFreight)](https://goreportcard.com/report/github.com/PrPlanIT/StageFreight) [![Go Reference](https://pkg.go.dev/badge/github.com/PrPlanIT/StageFreight.svg)](https://pkg.go.dev/github.com/PrPlanIT/StageFreight) [![Last Commit](https://img.shields.io/github/last-commit/PrPlanIT/StageFreight)](https://github.com/PrPlanIT/StageFreight/commits) [![Open Issues](https://img.shields.io/github/issues/PrPlanIT/StageFreight)](https://github.com/PrPlanIT/StageFreight/issues) ![github/issues-pr/PrPlanIT/StageFreight](https://img.shields.io/github/issues-pr/PrPlanIT/StageFreight) [![Contributors](https://img.shields.io/github/contributors/PrPlanIT/StageFreight)](https://github.com/PrPlanIT/StageFreight/graphs/contributors)
