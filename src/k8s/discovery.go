@@ -62,6 +62,10 @@ func Discover(ctx context.Context, catalogPath, repoRoot string, exposureRules c
 		return nil, err
 	}
 
+	// Phase 1.5: Prefix-based family grouping for unlabeled multi-component apps.
+	// Only touches name-fallback workloads. Never merges into labeled identities.
+	groupByPrefix(groups)
+
 	// Phase 2: Augment with services
 	if err := augmentServices(ctx, clientset, groups); err != nil {
 		return nil, err
@@ -356,6 +360,112 @@ func addWorkload(groups map[AppKey]*appGroup, id WorkloadIdentity, wl workloadIn
 	}
 
 	g.workloads = append(g.workloads, wl)
+}
+
+// genericPrefixDenylist contains tokens that are too generic to be family prefixes.
+var genericPrefixDenylist = map[string]bool{
+	"api": true, "web": true, "app": true, "service": true,
+	"backend": true, "frontend": true, "worker": true, "server": true,
+	"db": true, "cache": true, "proxy": true, "ingress": true,
+}
+
+// groupByPrefix merges unlabeled multi-component workloads into family groups.
+// Only touches workloads with Source == "name" (label-based identities are frozen).
+// Never merges into existing labeled identities.
+// Prefix selection: shortest stable prefix, ≥2 matches, non-empty suffixes, denylist enforced.
+func groupByPrefix(groups map[AppKey]*appGroup) {
+	// Collect name-fallback groups per namespace.
+	type candidate struct {
+		key   AppKey
+		group *appGroup
+	}
+	byNS := map[string][]candidate{}
+
+	for key, g := range groups {
+		if g.identity.Source == "name" {
+			byNS[key.Namespace] = append(byNS[key.Namespace], candidate{key: key, group: g})
+		}
+	}
+
+	for _, candidates := range byNS {
+		if len(candidates) < 2 {
+			continue
+		}
+
+		// Find prefix families.
+		// For each candidate, extract potential prefix (everything before last "-" segment).
+		prefixMembers := map[string][]candidate{}
+		for _, c := range candidates {
+			prefix := extractPrefix(c.key.Identity)
+			if prefix == "" || genericPrefixDenylist[prefix] {
+				continue
+			}
+			prefixMembers[prefix] = append(prefixMembers[prefix], c)
+		}
+
+		// Merge groups that share a prefix with ≥2 members.
+		for prefix, members := range prefixMembers {
+			if len(members) < 2 {
+				continue
+			}
+
+			// Ensure prefix doesn't collide with an existing labeled identity.
+			familyKey := AppKey{Namespace: members[0].key.Namespace, Identity: prefix}
+			if existing, ok := groups[familyKey]; ok && existing.identity.Source != "name" {
+				continue // labeled identity exists — never merge into it
+			}
+
+			// Create or find the family group.
+			family, exists := groups[familyKey]
+			if !exists {
+				family = &appGroup{
+					identity: WorkloadIdentity{
+						Key:    familyKey,
+						Source: "prefix",
+					},
+				}
+			}
+
+			// Merge members into family.
+			for _, m := range members {
+				// Move workloads to family.
+				for _, wl := range m.group.workloads {
+					family.workloads = append(family.workloads, wl)
+				}
+				// Move routes.
+				family.routes = append(family.routes, m.group.routes...)
+				// Move services.
+				family.services = append(family.services, m.group.services...)
+				// Inherit first pod labels if family has none.
+				if family.podLabels == nil && m.group.podLabels != nil {
+					family.podLabels = m.group.podLabels
+				}
+
+				// Remove old group.
+				if m.key != familyKey {
+					delete(groups, m.key)
+				}
+			}
+
+			groups[familyKey] = family
+		}
+	}
+}
+
+// extractPrefix returns the family prefix from a workload name.
+// "tactical-backend" → "tactical"
+// "erpnext-redis-cache" → "erpnext"
+// "standalone" → "" (no prefix)
+func extractPrefix(name string) string {
+	idx := strings.Index(name, "-")
+	if idx <= 0 || idx >= len(name)-1 {
+		return "" // no hyphen or empty prefix/suffix
+	}
+	prefix := name[:idx]
+	if len(prefix) < 3 {
+		return "" // too short
+	}
+	return prefix
 }
 
 // augmentServices attaches Services to app groups via strict selector matching.

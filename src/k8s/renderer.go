@@ -83,8 +83,12 @@ func RenderOverview(result *DiscoveryResult, commitSHA string) string {
 		b.WriteString("| Component | Namespace | Status |\n")
 		b.WriteString("| --- | --- | --- |\n")
 		for _, r := range result.Platform {
+			name := escMD(r.FriendlyName)
+			if len(r.Components) > 1 {
+				name = fmt.Sprintf("%s (%d components)", name, len(r.Components))
+			}
 			b.WriteString(fmt.Sprintf("| %s | %s | %s |\n",
-				escMD(r.FriendlyName),
+				name,
 				escMD(r.Key.Namespace),
 				statusIcon(r.Status),
 			))
@@ -147,8 +151,14 @@ func renderAppsByCategory(b *strings.Builder, apps []AppRecord) {
 		// Links cell: action-oriented, max 3
 		links := renderSourceLinks(r)
 
+		// App name with component count for multi-component families.
+		appName := escMD(r.FriendlyName)
+		if len(r.Components) > 1 {
+			appName = fmt.Sprintf("%s (%d components)", appName, len(r.Components))
+		}
+
 		b.WriteString(fmt.Sprintf("| %s | %s | %s | %s |\n",
-			escMD(r.FriendlyName),
+			appName,
 			statusIcon(r.Status),
 			exposure,
 			links,
@@ -162,8 +172,12 @@ func renderAppsByCategory(b *strings.Builder, apps []AppRecord) {
 	// Layer 2: Details per app (collapsed)
 	b.WriteString("<details>\n<summary>App details</summary>\n\n")
 	for _, r := range apps {
+		header := escMD(r.FriendlyName)
+		if len(r.Components) > 1 {
+			header = fmt.Sprintf("%s — %d components", header, len(r.Components))
+		}
 		b.WriteString(fmt.Sprintf("**%s** — %s — %s\n",
-			escMD(r.FriendlyName),
+			header,
 			escMD(renderType(r.WorkloadKinds)),
 			escMD(r.Version)))
 		b.WriteString(fmt.Sprintf("- Namespace: %s\n", r.Key.Namespace))
@@ -177,6 +191,14 @@ func renderAppsByCategory(b *strings.Builder, apps []AppRecord) {
 		}
 		if r.Description != "" {
 			b.WriteString(fmt.Sprintf("- Description: %s\n", r.Description))
+		}
+
+		// Component breakdown for multi-component families.
+		if len(r.Components) > 1 {
+			b.WriteString("- Components:\n")
+			for _, c := range r.Components {
+				b.WriteString(fmt.Sprintf("  - %s (%s)\n", c.Name, c.Kind))
+			}
 		}
 
 		// Full source breakdown
