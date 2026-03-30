@@ -28,12 +28,11 @@ func (m *K8sInventoryModule) Render() string {
 	// If cluster config is declared, kubeconfig setup is REQUIRED — no silent degradation.
 	if m.ClusterConfig.Name != "" {
 		rctx := &runtime.RuntimeContext{}
-		cleanup, err := gitops.BuildKubeconfig(m.ClusterConfig, rctx)
-		if err != nil {
+		if err := gitops.BuildKubeconfig(m.ClusterConfig, rctx); err != nil {
 			diag.Error("k8s-inventory: cluster %q configured but kubeconfig setup failed: %s", m.ClusterConfig.Name, err)
 			return ""
 		}
-		defer cleanup()
+		defer rctx.Resolved.Cleanup()
 	}
 
 	result, err := k8s.Discover(context.Background(), m.CatalogPath, m.RepoRoot, m.ClusterConfig.Exposure)
