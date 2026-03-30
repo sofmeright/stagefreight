@@ -4,7 +4,7 @@
 
 # StageFreight
 
-> *If the world's a stage, give it a pipeline.*
+> *The world's a stage, give it a pipeline.*
 
 A declarative lifecycle runtime that governs Git as the source of truth, enforcing operator-defined intent across GitOps workflows, Kubernetes, Docker, and CI ecosystems. StageFreight is open-source, self-building, and replaces fragile shell-script CI pipelines with a single Go binary driven by one [`.stagefreight.yml`](.stagefreight.yml) file. There's a setting for every stage — this is theatre.
 
