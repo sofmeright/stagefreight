@@ -26,6 +26,7 @@ Generated sections below are assembled from `docs/modules/config-reference.md` v
 - [`policies`](#config-policies)
 - [`builds`](#config-builds)
 - [`targets`](#config-targets)
+- [`badges`](#config-badges)
 - [`narrator`](#config-narrator)
 - [`lint`](#config-lint)
 - [`security`](#config-security)
@@ -256,6 +257,22 @@ targets:
 
 ---
 
+<a id="config-badges" name="config-badges"></a>
+### badges
+
+| Name | YAML Key | Type | Required | Default | Description |
+|------|----------|------|----------|---------|-------------|
+| `id` | `id` | string | Yes | — | string value |
+| `text` | `text` | string | Yes | — | string value |
+| `value` | `value` | string | Yes | — | string value |
+| `color` | `color` | string | Yes | — | string value |
+| `output` | `output` | string | Yes | — | string value |
+| `link` | `link` | string | No | — | string value |
+| `font` | `font` | string | No | — | string value |
+| `font_size` | `font_size` | int | No | — | int value |
+
+---
+
 <a id="config-narrator" name="config-narrator"></a>
 ### narrator
 
@@ -297,6 +314,7 @@ Content composition for file targets. Composes badges, shields, text, includes, 
 | `style` | `items.style` | string | No | — | string value |
 | `logo` | `items.logo` | string | No | — | string value |
 | `catalog` | `items.catalog` | string | No | — | string value |
+| `ref` | `items.ref` | string | No | — | string value |
 
 **`items.kind` allowed values:** `badge`, `shield`, `text`, `component`, `break`, `include`
 
