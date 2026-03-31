@@ -4,7 +4,7 @@ go 1.26.1
 
 require (
 	github.com/Masterminds/semver/v3 v3.4.0
-	github.com/go-git/go-git/v5 v5.17.1
+	github.com/go-git/go-git/v5 v5.17.2
 	github.com/moby/patternmatcher v0.6.1
 	github.com/pelletier/go-toml/v2 v2.3.0
 	github.com/spf13/cobra v1.10.2
