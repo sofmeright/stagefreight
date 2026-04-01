@@ -81,9 +81,30 @@ func ResolvePresets(raw map[string]any, loader PresetLoader, sourceRef, sourcePa
 			return nil, nil, fmt.Errorf("%s: preset %q declares top-level key %q, expected %q", key, presetPath, topKey, key)
 		}
 
-		presetSection, ok := presetParsed[topKey].(map[string]any)
-		if !ok {
-			return nil, nil, fmt.Errorf("%s: preset %q top-level key %q is not an object", key, presetPath, topKey)
+		presetValue := presetParsed[topKey]
+		presetSection, isMap := presetValue.(map[string]any)
+
+		// If the preset value is a list (e.g., targets: [...]), use it directly.
+		// No recursive resolution needed for list-type sections.
+		if !isMap {
+			// List or scalar preset — merge directly. Local sibling keys override.
+			localOverrides := withoutKey(section, "preset")
+			if len(localOverrides) > 0 {
+				// Can't deep-merge into a list — local replaces entirely.
+				result[key] = localOverrides
+			} else {
+				result[key] = presetValue
+			}
+			entries = append(entries, MergeEntry{
+				Path:      key,
+				Source:    "preset:" + presetPath,
+				SourceRef: sourceRef,
+				Layer:     depth + 1,
+				Operation: "set",
+				Value:     presetValue,
+			})
+			delete(seen, presetPath)
+			continue
 		}
 
 		// Check if the loaded preset itself references another preset (nested/chained).
