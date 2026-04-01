@@ -101,7 +101,7 @@ func runGovernanceReconcile(cmd *cobra.Command, args []string) error {
 			BaseURL:      govForgeURL,
 			CredPrefix:   govCredPrefix,
 		}
-		forgeReader = &forgeReaderAdapter{factory: factory}
+		forgeReader = &forgeAdapter{factory: factory}
 		fmt.Fprintf(os.Stderr, "Forge reader: %s @ %s (cred: %s_*)\n", govProvider, govForgeURL, govCredPrefix)
 	} else {
 		fmt.Fprintln(os.Stderr, "Forge reader: not configured (no --forge-url, drift detection disabled)")
@@ -153,9 +153,39 @@ func runGovernanceReconcile(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Phase 6: Commit (not yet wired — requires forge client).
-	fmt.Fprintln(os.Stderr, "\nCommit phase: not yet implemented (use --dry-run to preview)")
-	return nil
+	// Phase 6: Commit to satellite repos.
+	if govForgeURL == "" {
+		return fmt.Errorf("--forge-url required for commit mode (use --dry-run to preview without credentials)")
+	}
+
+	factory := &forge.BasicFactory{
+		ProviderName: govProvider,
+		BaseURL:      govForgeURL,
+		CredPrefix:   govCredPrefix,
+	}
+	forgeClient := &forgeAdapter{factory: factory}
+
+	fmt.Fprintln(os.Stderr, "\nCommitting to satellite repos...")
+	results, err := governance.CommitDistribution(plans, forgeClient, sourceIdentity, source.Ref, false)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "\nReconcile completed with errors\n")
+	}
+
+	for _, r := range results {
+		status := r.Status
+		if r.Drifted {
+			status += " (drifted)"
+		}
+		if r.Error != nil {
+			fmt.Fprintf(os.Stderr, "  %s: %s — %v\n", r.Repo, status, r.Error)
+		} else if r.SHA != "" {
+			fmt.Fprintf(os.Stderr, "  %s: %s [%s]\n", r.Repo, status, r.SHA[:8])
+		} else {
+			fmt.Fprintf(os.Stderr, "  %s: %s\n", r.Repo, status)
+		}
+	}
+
+	return err
 }
 
 // resolveGovernanceSource determines the governance source from CLI flags or config.
@@ -225,16 +255,56 @@ func extractIdentity(repoURL string) string {
 }
 
 // forgeReaderAdapter wraps a forge.Factory to satisfy governance.ForgeReader.
+// forgeAdapter wraps forge.Factory to satisfy both governance.ForgeReader and governance.ForgeClient.
 // Governance selects repos; the factory materializes per-repo forge clients.
-type forgeReaderAdapter struct {
+type forgeAdapter struct {
 	factory forge.Factory
 }
 
-func (a *forgeReaderAdapter) GetFileContent(repo, path, ref string) ([]byte, error) {
+func (a *forgeAdapter) GetFileContent(repo, path, ref string) ([]byte, error) {
 	ctx := context.Background()
 	f, err := a.factory.ForRepo(ctx, repo)
 	if err != nil {
 		return nil, fmt.Errorf("creating forge for %s: %w", repo, err)
 	}
 	return f.GetFileContent(ctx, path, ref)
+}
+
+func (a *forgeAdapter) DefaultBranch(repo string) (string, error) {
+	ctx := context.Background()
+	f, err := a.factory.ForRepo(ctx, repo)
+	if err != nil {
+		return "", fmt.Errorf("creating forge for %s: %w", repo, err)
+	}
+	return f.DefaultBranch(ctx)
+}
+
+func (a *forgeAdapter) CommitFiles(repo, branch, message string, files []governance.FileCommit) (string, error) {
+	ctx := context.Background()
+	f, err := a.factory.ForRepo(ctx, repo)
+	if err != nil {
+		return "", fmt.Errorf("creating forge for %s: %w", repo, err)
+	}
+
+	// Convert governance FileCommit to forge FileAction.
+	forgeFiles := make([]forge.FileAction, 0, len(files))
+	for _, fc := range files {
+		forgeFiles = append(forgeFiles, forge.FileAction{
+			Path:    fc.Path,
+			Content: fc.Content,
+		})
+	}
+
+	result, err := f.CommitFiles(ctx, forge.CommitFilesOptions{
+		Branch:  branch,
+		Message: message,
+		Files:   forgeFiles,
+	})
+	if err != nil {
+		return "", err
+	}
+	if result == nil {
+		return "", nil
+	}
+	return result.SHA, nil
 }
