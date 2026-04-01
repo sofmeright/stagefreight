@@ -1,19 +1,24 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/PrPlanIT/StageFreight/src/forge"
 	"github.com/PrPlanIT/StageFreight/src/governance"
 )
 
 var (
-	govDryRun    bool
-	govSource    string // override governance source repo URL
-	govRef       string // override governance source ref
-	govPath      string // override governance clusters file path
+	govDryRun      bool
+	govSource      string // override governance source repo URL
+	govRef         string // override governance source ref
+	govPath        string // override governance clusters file path
+	govProvider    string // forge provider for target repos (gitlab, github, gitea)
+	govForgeURL    string // forge base URL for target repos
+	govCredPrefix  string // credential env var prefix for forge API
 )
 
 var governanceReconcileCmd = &cobra.Command{
@@ -31,6 +36,9 @@ func init() {
 	governanceReconcileCmd.Flags().StringVar(&govSource, "source", "", "Override governance source repo URL")
 	governanceReconcileCmd.Flags().StringVar(&govRef, "ref", "", "Override governance source ref")
 	governanceReconcileCmd.Flags().StringVar(&govPath, "path", "", "Override governance clusters file path")
+	governanceReconcileCmd.Flags().StringVar(&govProvider, "provider", "gitlab", "Forge provider for target repos (gitlab, github, gitea)")
+	governanceReconcileCmd.Flags().StringVar(&govForgeURL, "forge-url", "", "Forge base URL for target repos (e.g., https://gitlab.prplanit.com)")
+	governanceReconcileCmd.Flags().StringVar(&govCredPrefix, "cred-prefix", "GITLAB", "Credential env var prefix for forge API")
 	governanceCmd.AddCommand(governanceReconcileCmd)
 }
 
@@ -85,10 +93,23 @@ func runGovernanceReconcile(cmd *cobra.Command, args []string) error {
 
 	sourceIdentity := extractIdentity(source.RepoURL)
 
-	// In dry-run, we don't have a forge reader — plan without drift detection.
+	// Build forge reader for drift detection.
+	var forgeReader governance.ForgeReader
+	if govForgeURL != "" {
+		factory := &forge.BasicFactory{
+			ProviderName: govProvider,
+			BaseURL:      govForgeURL,
+			CredPrefix:   govCredPrefix,
+		}
+		forgeReader = &forgeReaderAdapter{factory: factory}
+		fmt.Fprintf(os.Stderr, "Forge reader: %s @ %s (cred: %s_*)\n", govProvider, govForgeURL, govCredPrefix)
+	} else {
+		fmt.Fprintln(os.Stderr, "Forge reader: not configured (no --forge-url, drift detection disabled)")
+	}
+
 	plans, err := governance.PlanDistribution(
 		gov, presetLoader, skeleton, auxFiles,
-		nil, // no forge reader in dry-run (TODO: add real forge reader for live mode)
+		forgeReader,
 		sourceIdentity, source.Ref,
 	)
 	if err != nil {
@@ -201,4 +222,19 @@ func extractIdentity(repoURL string) string {
 	// Strip .git suffix.
 	s = strings.TrimSuffix(s, ".git")
 	return s
+}
+
+// forgeReaderAdapter wraps a forge.Factory to satisfy governance.ForgeReader.
+// Governance selects repos; the factory materializes per-repo forge clients.
+type forgeReaderAdapter struct {
+	factory forge.Factory
+}
+
+func (a *forgeReaderAdapter) GetFileContent(repo, path, ref string) ([]byte, error) {
+	ctx := context.Background()
+	f, err := a.factory.ForRepo(ctx, repo)
+	if err != nil {
+		return nil, fmt.Errorf("creating forge for %s: %w", repo, err)
+	}
+	return f.GetFileContent(ctx, path, ref)
 }
