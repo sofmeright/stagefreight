@@ -9,6 +9,7 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -415,4 +416,45 @@ func (g *GitHubForge) DeleteTag(ctx context.Context, tagName string) error {
 
 func (g *GitHubForge) DownloadJobArtifact(ctx context.Context, ref, jobName, artifactPath string) ([]byte, error) {
 	return nil, ErrNotSupported
+}
+
+func (g *GitHubForge) GetFileContent(ctx context.Context, path, ref string) ([]byte, error) {
+	if ref == "" {
+		var err error
+		ref, err = g.DefaultBranch(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("resolving default branch: %w", err)
+		}
+	}
+	u := g.apiURL(fmt.Sprintf("/contents/%s?ref=%s", path, url.QueryEscape(ref)))
+
+	var resp struct {
+		Content  string `json:"content"`
+		Encoding string `json:"encoding"`
+	}
+	if err := g.doJSON(ctx, "GET", u, nil, &resp); err != nil {
+		return nil, err
+	}
+
+	if resp.Encoding == "base64" {
+		// GitHub base64 has newlines — strip them before decoding.
+		clean := strings.ReplaceAll(resp.Content, "\n", "")
+		data, err := base64.StdEncoding.DecodeString(clean)
+		if err != nil {
+			return nil, fmt.Errorf("decoding base64 content for %s: %w", path, err)
+		}
+		return data, nil
+	}
+
+	return []byte(resp.Content), nil
+}
+
+func (g *GitHubForge) DefaultBranch(ctx context.Context) (string, error) {
+	var resp struct {
+		DefaultBranch string `json:"default_branch"`
+	}
+	if err := g.doJSON(ctx, "GET", g.apiURL(""), nil, &resp); err != nil {
+		return "", fmt.Errorf("reading repo info: %w", err)
+	}
+	return resp.DefaultBranch, nil
 }

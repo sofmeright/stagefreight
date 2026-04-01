@@ -107,6 +107,34 @@ type Forge interface {
 	// Returns os.ErrNotExist (or equivalent) if no artifacts found.
 	// Implementations may return ErrNotSupported if the forge doesn't support this.
 	DownloadJobArtifact(ctx context.Context, ref, jobName, artifactPath string) ([]byte, error)
+
+	// GetFileContent reads a file from the repo at the given ref.
+	// Returns the raw file content. Returns os.ErrNotExist if file is not found.
+	// Used by governance drift detection, asset sync, and repo inspection.
+	GetFileContent(ctx context.Context, path, ref string) ([]byte, error)
+
+	// DefaultBranch returns the default branch name for the repo.
+	DefaultBranch(ctx context.Context) (string, error)
+}
+
+// Factory creates Forge instances for target repos.
+// Used by governance and asset distribution for cross-repo operations.
+// Centralizes provider selection and credential resolution.
+type Factory interface {
+	ForRepo(ctx context.Context, repo string) (Forge, error)
+}
+
+// BasicFactory creates Forge instances for repos on a single forge platform.
+// Used by governance reconciler for cross-repo operations.
+type BasicFactory struct {
+	ProviderName string // "gitlab", "github", "gitea"
+	BaseURL      string // e.g., "https://gitlab.prplanit.com"
+	CredPrefix   string // credential env var prefix
+}
+
+// ForRepo creates a Forge client for the given repo (e.g., "PrPlanIT/HASteward").
+func (f *BasicFactory) ForRepo(ctx context.Context, repo string) (Forge, error) {
+	return NewFromAccessory(f.ProviderName, f.BaseURL, repo, f.CredPrefix)
 }
 
 // ReleaseOptions configures a new release.

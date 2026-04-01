@@ -300,6 +300,46 @@ func (g *GitLabForge) fileExists(ctx context.Context, path, branch string) bool 
 	return resp.StatusCode == http.StatusOK
 }
 
+func (g *GitLabForge) GetFileContent(ctx context.Context, path, ref string) ([]byte, error) {
+	if ref == "" {
+		var err error
+		ref, err = g.DefaultBranch(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("resolving default branch: %w", err)
+		}
+	}
+	encodedPath := url.PathEscape(path)
+	fileURL := g.apiURL(fmt.Sprintf("/repository/files/%s?ref=%s", encodedPath, url.QueryEscape(ref)))
+
+	var resp struct {
+		Content  string `json:"content"`
+		Encoding string `json:"encoding"`
+	}
+	if err := g.doJSON(ctx, "GET", fileURL, nil, &resp); err != nil {
+		return nil, err
+	}
+
+	if resp.Encoding == "base64" {
+		data, err := base64.StdEncoding.DecodeString(resp.Content)
+		if err != nil {
+			return nil, fmt.Errorf("decoding base64 content for %s: %w", path, err)
+		}
+		return data, nil
+	}
+
+	return []byte(resp.Content), nil
+}
+
+func (g *GitLabForge) DefaultBranch(ctx context.Context) (string, error) {
+	var resp struct {
+		DefaultBranch string `json:"default_branch"`
+	}
+	if err := g.doJSON(ctx, "GET", g.apiURL(""), nil, &resp); err != nil {
+		return "", fmt.Errorf("reading project info: %w", err)
+	}
+	return resp.DefaultBranch, nil
+}
+
 func (g *GitLabForge) CreateMR(ctx context.Context, opts MROptions) (*MR, error) {
 	payload := map[string]interface{}{
 		"title":         opts.Title,
