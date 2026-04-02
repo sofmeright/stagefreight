@@ -1,0 +1,96 @@
+# StageFreight GitLab Runner — Reference Setup
+#
+# Docker-in-Docker runner with persistent storage for BuildKit cache reuse.
+# This is the recommended setup for self-hosted StageFreight CI.
+#
+# Key design decisions:
+#   - DinD with named volume: Docker storage persists between pipeline runs
+#   - BuildKit cache survives because the DinD daemon is long-lived
+#   - The skeleton reuses the builder (sf-builder) instead of creating fresh
+#   - TLS between runner and DinD for security
+#
+# Prerequisites:
+#   - Docker host with Docker Compose
+#   - GitLab instance URL and registration token
+#   - Sufficient disk for dind-storage (recommend 50GB+)
+#
+# Usage:
+#   1. Copy this file to docker-compose.yml
+#   2. Create .env with CI_SERVER_URL and REGISTRATION_TOKEN
+#   3. docker compose up -d
+#   4. Verify runner appears in GitLab Admin > CI/CD > Runners
+#
+# Disk management:
+#   The dind-storage volume accumulates build layers over time.
+#   StageFreight's standard skeleton runs pre-build cleanup automatically.
+#   For manual cleanup: docker exec <dind-container> docker system prune -af
+
+services:
+  dind:
+    image: docker:dind
+    privileged: true
+    restart: always
+    environment:
+      DOCKER_TLS_CERTDIR: /certs
+      DOCKER_TLS_SAN: DNS:dind
+    volumes:
+      - dind-storage:/var/lib/docker
+      - ./certs:/certs
+    healthcheck:
+      test: ["CMD", "docker", "info"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+  register-runner:
+    image: gitlab/gitlab-runner:latest
+    restart: "no"
+    depends_on:
+      dind:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        if [ ! -f /etc/gitlab-runner/config.toml ]; then
+          echo "Registering runner..."
+          gitlab-runner register \
+            --non-interactive \
+            --locked=false \
+            --name=$${RUNNER_NAME:-"StageFreight Runner"} \
+            --executor=docker \
+            --docker-image=alpine:latest \
+            --docker-host=tcp://dind:2376 \
+            --tag-list=$${RUNNER_TAGS:-"docker"} \
+            --run-untagged=$${RUN_UNTAGGED:-true}
+        else
+          echo "Runner already registered"
+        fi
+    environment:
+      - CI_SERVER_URL=${CI_SERVER_URL}
+      - REGISTRATION_TOKEN=${REGISTRATION_TOKEN}
+      - DOCKER_TLS_VERIFY=1
+      - DOCKER_CERT_PATH=/certs/client
+    volumes:
+      - ./config:/etc/gitlab-runner:z
+      - ./certs:/certs:ro
+
+  runner:
+    image: gitlab/gitlab-runner:latest
+    restart: always
+    depends_on:
+      dind:
+        condition: service_healthy
+    environment:
+      - DOCKER_HOST=tcp://dind:2376
+      - DOCKER_TLS_VERIFY=1
+      - DOCKER_CERT_PATH=/certs/client
+    volumes:
+      - ./config:/etc/gitlab-runner:z
+      - ./certs:/certs:ro
+
+volumes:
+  dind-storage:
+    # Persistent Docker storage for BuildKit cache reuse.
+    # BuildKit layers, pulled images, and build cache survive between pipeline runs.
+    # StageFreight skeleton reuses the sf-builder instance across jobs.

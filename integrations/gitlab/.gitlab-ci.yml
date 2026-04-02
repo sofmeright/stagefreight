@@ -47,8 +47,8 @@ build-image:
     expire_in: 7 days # override in your .gitlab-ci.yml if your pipeline needs a different retention window
   before_script:
     - *sf-context
-    - docker context create tls-context --docker "host=$DOCKER_HOST,ca=$DOCKER_CERT_PATH/ca.pem,cert=$DOCKER_CERT_PATH/cert.pem,key=$DOCKER_CERT_PATH/key.pem"
-    - docker buildx create --name stagefreight-builder --use tls-context
+    - docker context create tls-context --docker "host=$DOCKER_HOST,ca=$DOCKER_CERT_PATH/ca.pem,cert=$DOCKER_CERT_PATH/cert.pem,key=$DOCKER_CERT_PATH/key.pem" 2>/dev/null || true
+    - docker buildx create --name sf-builder --use tls-context 2>/dev/null || docker buildx use sf-builder
   script:
     - stagefreight ci run build
   rules:
@@ -68,8 +68,8 @@ dependency-update:
     DOCKER_TLS_CERTDIR: "/certs"
   before_script:
     - *sf-context
-    - docker context create tls-context --docker "host=$DOCKER_HOST,ca=$DOCKER_CERT_PATH/ca.pem,cert=$DOCKER_CERT_PATH/cert.pem,key=$DOCKER_CERT_PATH/key.pem"
-    - docker buildx create --name deps-builder --use tls-context
+    - docker context create tls-context --docker "host=$DOCKER_HOST,ca=$DOCKER_CERT_PATH/ca.pem,cert=$DOCKER_CERT_PATH/cert.pem,key=$DOCKER_CERT_PATH/key.pem" 2>/dev/null || true
+    - docker buildx create --name sf-builder --use tls-context 2>/dev/null || docker buildx use sf-builder
   script:
     - stagefreight ci run deps
   artifacts:
@@ -96,8 +96,8 @@ security-scan:
     expire_in: 7 days # override in your .gitlab-ci.yml if your pipeline needs a different retention window
   before_script:
     - *sf-context
-    - docker context create tls-context --docker "host=$DOCKER_HOST,ca=$DOCKER_CERT_PATH/ca.pem,cert=$DOCKER_CERT_PATH/cert.pem,key=$DOCKER_CERT_PATH/key.pem"
-    - docker buildx create --name security-scanner --use tls-context
+    - docker context create tls-context --docker "host=$DOCKER_HOST,ca=$DOCKER_CERT_PATH/ca.pem,cert=$DOCKER_CERT_PATH/cert.pem,key=$DOCKER_CERT_PATH/key.pem" 2>/dev/null || true
+    - docker buildx create --name sf-builder --use tls-context 2>/dev/null || docker buildx use sf-builder
   script:
     - stagefreight ci run security
   rules:
