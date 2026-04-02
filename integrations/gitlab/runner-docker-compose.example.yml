@@ -1,12 +1,15 @@
 # StageFreight GitLab Runner — Reference Setup
 #
-# Docker-in-Docker runner with persistent storage for BuildKit cache reuse.
-# This is the recommended setup for self-hosted StageFreight CI.
+# Docker executor with persistent external DinD for BuildKit cache reuse.
+# Job containers connect to the long-lived DinD daemon via DOCKER_HOST.
+# BuildKit cache graph survives between pipeline runs because the DinD
+# daemon and its storage volume are persistent.
 #
 # Key design decisions:
-#   - DinD with named volume: Docker storage persists between pipeline runs
-#   - BuildKit cache survives because the DinD daemon is long-lived
-#   - The skeleton reuses the builder (sf-builder) instead of creating fresh
+#   - External DinD with named volume: Docker storage persists between runs
+#   - Runner registers with --docker-host pointing to the persistent DinD
+#   - Job containers do NOT start per-job DinD services
+#   - The skeleton reuses the builder (sf-builder) across jobs
 #   - TLS between runner and DinD for security
 #
 # Prerequisites:
@@ -61,6 +64,10 @@ services:
             --executor=docker \
             --docker-image=alpine:latest \
             --docker-host=tcp://dind:2376 \
+            --docker-tls-cert-path=/certs/client \
+            --docker-tls-verify=true \
+            --docker-privileged=false \
+            --docker-volumes="/certs/client:/certs/client:ro" \
             --tag-list=$${RUNNER_TAGS:-"docker"} \
             --run-untagged=$${RUN_UNTAGGED:-true}
         else
@@ -93,4 +100,4 @@ volumes:
   dind-storage:
     # Persistent Docker storage for BuildKit cache reuse.
     # BuildKit layers, pulled images, and build cache survive between pipeline runs.
-    # StageFreight skeleton reuses the sf-builder instance across jobs.
+    # Job containers connect to this DinD via DOCKER_HOST — no per-job DinD services.
