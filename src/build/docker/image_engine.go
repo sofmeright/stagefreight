@@ -79,6 +79,9 @@ func (e *imageEngine) Plan(ctx context.Context, cfgRaw interface{}, det *build.D
 	}
 
 	// Inject build cache flags from config.
+	// CacheFrom (import) goes on all steps.
+	// CacheTo (export) only on steps that push — auth is only available there.
+	// Crucible/load-only steps get import but not export.
 	if cfg.BuildCache.IsActive() {
 		repoID := resolveRepoID(det, versionInfo)
 		branch := currentBranch
@@ -88,7 +91,9 @@ func (e *imageEngine) Plan(ctx context.Context, cfgRaw interface{}, det *build.D
 		cacheFrom, cacheTo := BuildCacheFlags(cfg.BuildCache, repoID, branch, cfg.Targets)
 		for i := range plan.Steps {
 			plan.Steps[i].CacheFrom = cacheFrom
-			plan.Steps[i].CacheTo = cacheTo
+			if plan.Steps[i].Push {
+				plan.Steps[i].CacheTo = cacheTo
+			}
 		}
 	}
 
