@@ -50,6 +50,17 @@ func newPushFailure(err error, fallbackStderr string) postbuild.PushFailure {
 	}
 }
 
+// isCacheExportError returns true if the build failure is caused by cache export
+// (auth, network, permission) rather than the actual build. Cache export failures
+// should never break builds — the build is retried without --cache-to.
+func isCacheExportError(err error, combinedOutput string) bool {
+	lower := strings.ToLower(combinedOutput)
+	return strings.Contains(lower, "exporting cache") ||
+		strings.Contains(lower, "failed to export cache") ||
+		strings.Contains(lower, "error writing layer blob") ||
+		strings.Contains(lower, "insufficient_scope")
+}
+
 // collectPushRegistries returns the non-local registries from load-then-push
 // steps (step.Load && !step.Push). Used to pass registry targets to push
 // recovery without inlining the loop at each call site.
@@ -172,6 +183,21 @@ func executePhase(req Request) pipeline.Phase {
 						}
 						stepResult.Layers = layers
 					}
+				}
+
+				// Cache export fallback: if build fails due to cache export (auth, network),
+				// retry without --cache-to. Cache export must never break builds.
+				if err != nil && len(step.CacheTo) > 0 && isCacheExportError(err, stdoutBuf.String()+"\n"+stderrBuf.String()) {
+					diag.Warn("cache export failed — retrying build without cache export")
+					retryStep := step
+					retryStep.CacheTo = nil
+					stderrBuf.Reset()
+					stdoutBuf.Reset()
+					stepResult, layers, err = bx.BuildWithLayers(pc.Ctx, retryStep)
+					if stepResult == nil {
+						stepResult = &build.StepResult{Name: step.Name, Status: "failed"}
+					}
+					stepResult.Layers = layers
 				}
 
 				result.Steps = append(result.Steps, *stepResult)

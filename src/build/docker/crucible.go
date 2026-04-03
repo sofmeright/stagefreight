@@ -194,6 +194,10 @@ func runCrucibleMode(req Request) error {
 
 	var gestResult build.BuildResult
 	for _, step := range plan.Steps {
+		// Crucible never pushes — strip cache export to avoid auth failures.
+		// Cache import (CacheFrom) is kept for layer reuse.
+		step.CacheTo = nil
+
 		stdoutBuf.Reset()
 		stderrBuf.Reset()
 		stepResult, layers, err := bx.BuildWithLayers(ctx, step)

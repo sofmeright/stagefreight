@@ -41,9 +41,9 @@ builds:
 
 
 build_cache:
-  mode: "off"
+  mode: hybrid
   external:
-    target: dockerhub-dev
+    target: harbor-dev
     path: "cache"
     fallback: "main"
 
