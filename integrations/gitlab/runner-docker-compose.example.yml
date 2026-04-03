@@ -1,32 +1,19 @@
-# StageFreight GitLab Runner — Reference Setup
+# StageFreight GitLab Runner — Persistent DinD
 #
-# Docker executor with persistent external DinD for BuildKit cache reuse.
-# Job containers connect to the long-lived DinD daemon via DOCKER_HOST.
-# BuildKit cache graph survives between pipeline runs because the DinD
-# daemon and its storage volume are persistent.
+# Docker executor with a long-lived DinD daemon for BuildKit cache reuse.
+# dind-storage volume persists Docker state (layers, images, cache) across
+# pipeline runs. Per-job DinD services from the skeleton handle Docker
+# access inside job containers via TLS shared certs at /certs/client.
 #
-# Key design decisions:
-#   - External DinD with named volume: Docker storage persists between runs
-#   - Runner registers with --docker-host pointing to the persistent DinD
-#   - Job containers do NOT start per-job DinD services
-#   - The skeleton reuses the builder (sf-builder) across jobs
-#   - TLS between runner and DinD for security
+# Registration uses --token (GitLab 16+). Tags, untagged, locked, etc.
+# are managed in GitLab UI, not in registration flags.
 #
-# Prerequisites:
-#   - Docker host with Docker Compose
-#   - GitLab instance URL and registration token
-#   - Sufficient disk for dind-storage (recommend 50GB+)
+# Required .env:
+#   CI_SERVER_URL=https://gitlab.example.com/
+#   RUNNER_TOKEN=glrt-...
 #
-# Usage:
-#   1. Copy this file to docker-compose.yml
-#   2. Create .env with CI_SERVER_URL and REGISTRATION_TOKEN
-#   3. docker compose up -d
-#   4. Verify runner appears in GitLab Admin > CI/CD > Runners
-#
-# Disk management:
-#   The dind-storage volume accumulates build layers over time.
-#   StageFreight's standard skeleton runs pre-build cleanup automatically.
-#   For manual cleanup: docker exec <dind-container> docker system prune -af
+# Optional .env:
+#   RUNNER_NAME=MyRunner  (default: StageFreight Runner)
 
 services:
   dind:
@@ -38,7 +25,7 @@ services:
       DOCKER_TLS_SAN: DNS:dind
     volumes:
       - dind-storage:/var/lib/docker
-      - ./certs:/certs
+      - /opt/docker/gitlab-runner/certs:/certs
     healthcheck:
       test: ["CMD", "docker", "info"]
       interval: 10s
@@ -56,31 +43,30 @@ services:
     command:
       - |
         if [ ! -f /etc/gitlab-runner/config.toml ]; then
-          echo "Registering runner..."
+          echo "Config does not exist, registering runner..."
           gitlab-runner register \
-            --non-interactive \
-            --locked=false \
-            --name=$${RUNNER_NAME:-"StageFreight Runner"} \
-            --executor=docker \
-            --docker-image=alpine:latest \
+            --docker-dns=1.1.1.1 \
+            --docker-dns=8.8.8.8 \
             --docker-host=tcp://dind:2376 \
-            --docker-tls-cert-path=/certs/client \
-            --docker-tls-verify=true \
-            --docker-privileged=false \
-            --docker-volumes="/certs/client:/certs/client:ro" \
-            --tag-list=$${RUNNER_TAGS:-"docker"} \
-            --run-untagged=$${RUN_UNTAGGED:-true}
+            --docker-image=alpine:latest \
+            --docker-privileged=true \
+            --docker-volumes=/certs/client \
+            --executor=docker \
+            --name=$${RUNNER_NAME:-"StageFreight Runner"} \
+            --non-interactive \
+            --token=$${RUNNER_TOKEN} \
+            --url=$${CI_SERVER_URL}
         else
-          echo "Runner already registered"
+          echo "Runner config already exists, skipping registration"
         fi
     environment:
       - CI_SERVER_URL=${CI_SERVER_URL}
-      - REGISTRATION_TOKEN=${REGISTRATION_TOKEN}
+      - RUNNER_TOKEN=${RUNNER_TOKEN}
       - DOCKER_TLS_VERIFY=1
       - DOCKER_CERT_PATH=/certs/client
     volumes:
-      - ./config:/etc/gitlab-runner:z
-      - ./certs:/certs:ro
+      - /opt/docker/gitlab-runner/config:/etc/gitlab-runner:z
+      - /opt/docker/gitlab-runner/certs:/certs:ro
 
   runner:
     image: gitlab/gitlab-runner:latest
@@ -93,11 +79,8 @@ services:
       - DOCKER_TLS_VERIFY=1
       - DOCKER_CERT_PATH=/certs/client
     volumes:
-      - ./config:/etc/gitlab-runner:z
-      - ./certs:/certs:ro
+      - /opt/docker/gitlab-runner/config:/etc/gitlab-runner:z
+      - /opt/docker/gitlab-runner/certs:/certs:ro
 
 volumes:
   dind-storage:
-    # Persistent Docker storage for BuildKit cache reuse.
-    # BuildKit layers, pulled images, and build cache survive between pipeline runs.
-    # Job containers connect to this DinD via DOCKER_HOST — no per-job DinD services.
