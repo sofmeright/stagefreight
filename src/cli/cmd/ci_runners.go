@@ -1124,9 +1124,10 @@ func reconcileRunner(_ context.Context, appCfg *config.Config, ciCtx *ci.CIConte
 	start := time.Now()
 
 	hasGitOps := strings.TrimSpace(appCfg.GitOps.Cluster.Name) != ""
-	hasGovernance := len(appCfg.Governance.Clusters) > 0
+	hasGovernanceClusters := len(appCfg.Governance.Clusters) > 0
+	hasGovernanceSource := governanceSourceConfigured(appCfg)
 
-	if !hasGitOps && !hasGovernance {
+	if !hasGitOps && !hasGovernanceClusters {
 		renderCISkip("Reconcile", start, "no reconcile target configured")
 		return nil
 	}
@@ -1142,11 +1143,15 @@ func reconcileRunner(_ context.Context, appCfg *config.Config, ciCtx *ci.CIConte
 		}
 	}
 
-	// Governance reconcile — requires forge credentials, not cluster auth.
+	// Governance reconcile — requires clusters AND source configured.
 	// Not mutually exclusive with gitops — both can run.
-	if hasGovernance {
-		if err := runGovernanceReconcile(&cobra.Command{}, []string{}); err != nil {
-			return err
+	if hasGovernanceClusters {
+		if !hasGovernanceSource {
+			renderCISkip("Reconcile", start, "governance source not configured")
+		} else {
+			if err := runGovernanceReconcile(&cobra.Command{}, []string{}); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -1165,6 +1170,12 @@ func renderCISkip(section string, start time.Time, reason string) {
 	sec.Close()
 }
 
+// governanceSourceConfigured checks if governance has a resolvable source.
+func governanceSourceConfigured(_ *config.Config) bool {
+	src, err := resolveGovernanceSource()
+	return err == nil && src.RepoURL != ""
+}
+
 // ciSkipResult maps a skip reason to a human-readable outcome.
 func ciSkipResult(reason string) string {
 	switch reason {
@@ -1174,6 +1185,8 @@ func ciSkipResult(reason string) string {
 		return "nothing to reconcile"
 	case "cluster auth unavailable":
 		return "reconcile skipped — auth not available in this environment"
+	case "governance source not configured":
+		return "reconcile skipped — governance source not configured"
 	default:
 		return "skipped"
 	}
