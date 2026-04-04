@@ -55,12 +55,15 @@ func CrucibleTag(purpose, runID string) string {
 func RunCrucible(ctx context.Context, opts CrucibleOpts) (*CrucibleResult, error) {
 	result := &CrucibleResult{FinalImageRef: opts.FinalTag}
 
-	// Crucible container joins the stagefreight network so it can resolve
-	// both buildkitd and dind by hostname — same backend as gestation.
-	args := []string{"run", "--rm", "--network", "stagefreight"}
+	// Crucible container uses host network of the DinD daemon. Since DinD
+	// is on the stagefreight compose network, --network host gives the
+	// crucible DinD's network namespace — resolves both buildkitd and dind.
+	args := []string{"run", "--rm", "--network", "host"}
 
 	// Forward Docker transport (DinD access for --load, docker run, push).
-	dockerHost := os.Getenv("DOCKER_HOST")
+	// Resolve hostname to IP — --network host uses DinD's network namespace
+	// where Docker DNS doesn't work, but IP routing does.
+	dockerHost := resolveDockerHost(os.Getenv("DOCKER_HOST"))
 	if dockerHost != "" {
 		args = append(args, "-e", "DOCKER_HOST="+dockerHost)
 		for _, tlsVar := range []string{"DOCKER_TLS_VERIFY", "DOCKER_CERT_PATH"} {
@@ -81,6 +84,11 @@ func RunCrucible(ctx context.Context, opts CrucibleOpts) (*CrucibleResult, error
 	bkCertPath := "/buildkit-certs"
 	if _, err := os.Stat(bkCertPath + "/ca.pem"); err == nil {
 		args = append(args, "-v", bkCertPath+":"+bkCertPath+":ro")
+		// Resolve buildkitd hostname to IP for --network host (no Docker DNS).
+		// Pass as BUILDKIT_HOST so the engine inside the crucible can find it.
+		if resolved := resolveDockerHost("tcp://buildkitd:1234"); resolved != "" {
+			args = append(args, "-e", "BUILDKIT_HOST="+resolved)
+		}
 	}
 
 	// Mount stagefreight persistent data.
