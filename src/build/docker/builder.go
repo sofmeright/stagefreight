@@ -45,7 +45,7 @@ func ResolveBuilderInfo() BuilderInfo {
 
 	// Bootstrap and capture output (suppress from CI log).
 	bootstrapStart := time.Now()
-	bootstrapOut, bootstrapErr := exec.Command("docker", "buildx", "inspect", "--bootstrap").CombinedOutput()
+	bootstrapOut, bootstrapErr := exec.Command("docker", "buildx", "inspect", "--bootstrap", "sf-builder").CombinedOutput()
 	info.BootstrapDuration = time.Since(bootstrapStart)
 	info.BootstrapOK = bootstrapErr == nil
 	info.RawOutput = string(bootstrapOut)
