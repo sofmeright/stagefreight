@@ -260,6 +260,8 @@ func RunSecurityScan(req SecurityScanRequest) error {
 		FailOnCritical: req.FailOnCritical || req.Config.Security.FailOnCritical,
 		ImageRef:       imageRef,
 		OutputDir:      req.OutputDir,
+		TrivyCacheMax:  req.Config.Security.Cache.Trivy.MaxSize,
+		GrypeCacheMax:  req.Config.Security.Cache.Grype.MaxSize,
 	}
 	if scanCfg.OutputDir == "" {
 		scanCfg.OutputDir = req.Config.Security.OutputDir
@@ -347,6 +349,9 @@ func RunSecurityScan(req SecurityScanRequest) error {
 	sec.Row("%-16s%s", "source", target.Source)
 	sec.Row("%-16s%s", "selection", target.SelectionReason)
 	sec.Row("%-16s%s", "stability", stabilityLabel(target.Stability))
+	if result.CacheMode != "" {
+		sec.Row("%-16s%s", "db-cache", result.CacheMode)
+	}
 
 	if target.Digest != "" {
 		sec.Row("%-16s%s", "digest", target.Digest)

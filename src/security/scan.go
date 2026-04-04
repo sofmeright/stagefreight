@@ -10,9 +10,11 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
 
+	"github.com/PrPlanIT/StageFreight/src/config"
 	"github.com/PrPlanIT/StageFreight/src/diag"
 	"github.com/PrPlanIT/StageFreight/src/output"
 )
@@ -27,6 +29,8 @@ type ScanConfig struct {
 	ImageRef       string    // image reference or tarball path to scan
 	OutputDir      string    // directory for scan artifacts
 	SectionWriter  io.Writer // writer for CI section markers (nil = os.Stderr)
+	TrivyCacheMax  string    // max_size for Trivy DB cache (full-clear when exceeded)
+	GrypeCacheMax  string    // max_size for Grype DB cache (full-clear when exceeded)
 }
 
 // Vulnerability is a single parsed vulnerability from the scan.
@@ -106,6 +110,7 @@ type ScanResult struct {
 	ScannersRun     []ScannerInfo   // scanners that completed successfully
 	ScannersFailed  []ScannerInfo   // scanners that failed or were unavailable
 	Partial         bool            // true if any enabled scanner failed
+	CacheMode       string          // "persistent" or "ephemeral" — vuln DB cache location
 }
 
 // ClassifyRefStability determines the stability classification of an image reference.
@@ -141,6 +146,23 @@ func Scan(ctx context.Context, cfg ScanConfig) (*ScanResult, error) {
 		sw = os.Stderr
 	}
 
+	// Resolve persistent cache for scanner vulnerability DBs.
+	// Capability-based: use /stagefreight/cache/<tool> if mounted, else tools use defaults.
+	// Enforce size cap before scan: full-clear when over max_size (opaque DBs, no granular eviction).
+	trivyCacheDir := resolveScannerCacheDir("trivy")
+	grypeCacheDir := resolveScannerCacheDir("grype")
+	if trivyCacheDir != "" || grypeCacheDir != "" {
+		result.CacheMode = "persistent"
+	} else {
+		result.CacheMode = "ephemeral"
+	}
+	if trivyCacheDir != "" && cfg.TrivyCacheMax != "" {
+		enforceScannerCacheCap(trivyCacheDir, cfg.TrivyCacheMax)
+	}
+	if grypeCacheDir != "" && cfg.GrypeCacheMax != "" {
+		enforceScannerCacheCap(grypeCacheDir, cfg.GrypeCacheMax)
+	}
+
 	// Run Trivy if enabled and available.
 	if cfg.TrivyEnabled {
 		output.SectionStartCollapsed(sw, "sf_trivy_raw", "Trivy scanner (raw)")
@@ -148,14 +170,14 @@ func Scan(ctx context.Context, cfg ScanConfig) (*ScanResult, error) {
 			trivyVer := trivyVersion()
 			// Trivy JSON scan
 			jsonPath := cfg.OutputDir + "/security-scan.json"
-			if err := runTrivy(ctx, cfg.ImageRef, "json", jsonPath); err != nil {
+			if err := runTrivy(ctx, cfg.ImageRef, "json", jsonPath, trivyCacheDir); err != nil {
 				result.ScannersFailed = append(result.ScannersFailed, ScannerInfo{Name: "trivy", Version: trivyVer})
 				result.Partial = true
 				diag.Warn("trivy scan failed: %v", err)
 			} else {
 				// Trivy SARIF scan
 				sarifPath := cfg.OutputDir + "/vulnerability-report.sarif"
-				if err := runTrivy(ctx, cfg.ImageRef, "sarif", sarifPath); err != nil {
+				if err := runTrivy(ctx, cfg.ImageRef, "sarif", sarifPath, trivyCacheDir); err != nil {
 					diag.Warn("trivy SARIF generation failed (continuing): %v", err)
 				} else {
 					result.Artifacts = append(result.Artifacts, sarifPath)
@@ -182,7 +204,7 @@ func Scan(ctx context.Context, cfg ScanConfig) (*ScanResult, error) {
 		if _, lookErr := exec.LookPath("grype"); lookErr == nil {
 			grypeVer := grypeVersion()
 			grypeJSON := cfg.OutputDir + "/security-scan-grype.json"
-			if err := runGrype(ctx, cfg.ImageRef, "json", grypeJSON); err != nil {
+			if err := runGrype(ctx, cfg.ImageRef, "json", grypeJSON, grypeCacheDir); err != nil {
 				result.ScannersFailed = append(result.ScannersFailed, ScannerInfo{Name: "grype", Version: grypeVer})
 				result.Partial = true
 				diag.Warn("grype scan failed (continuing without Grype): %v", err)
@@ -423,6 +445,55 @@ func filterBySeverity(vulns []Vulnerability, severity string) []Vulnerability {
 	return out
 }
 
+// resolveScannerCacheDir returns a persistent cache path for a scanner's
+// vulnerability DB, or empty string if no persistent cache is available.
+// Capability-based: uses /stagefreight/cache/<tool> if mounted and writable.
+// Failure to use persistent cache is non-fatal — scanners fall back to defaults.
+func resolveScannerCacheDir(tool string) string {
+	sfCache := filepath.Join("/stagefreight", "cache", tool)
+	if info, err := os.Stat("/stagefreight"); err == nil && info.IsDir() {
+		if err := os.MkdirAll(sfCache, 0o755); err == nil {
+			return sfCache
+		}
+	}
+	return ""
+}
+
+// enforceScannerCacheCap checks if a scanner cache directory exceeds maxSize.
+// If over cap, deletes the entire directory (full-clear). These are opaque
+// tool-managed DBs — no granular eviction, just bounded hosting.
+// Errors are non-fatal but observable — silent failure would make cache
+// behavior non-deterministic.
+func enforceScannerCacheCap(cacheDir, maxSize string) {
+	maxBytes, err := config.ParseSize(maxSize)
+	if err != nil || maxBytes <= 0 {
+		return
+	}
+
+	var totalSize int64
+	if walkErr := filepath.Walk(cacheDir, func(_ string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() {
+			return nil
+		}
+		totalSize += info.Size()
+		return nil
+	}); walkErr != nil {
+		diag.Warn("scanner cache %s: walk failed: %v", cacheDir, walkErr)
+		return
+	}
+
+	if totalSize > maxBytes {
+		diag.Info("scanner cache %s exceeds %s (%d bytes), clearing", cacheDir, maxSize, totalSize)
+		if err := os.RemoveAll(cacheDir); err != nil {
+			diag.Warn("scanner cache %s: clear failed: %v", cacheDir, err)
+			return
+		}
+		if err := os.MkdirAll(cacheDir, 0o755); err != nil {
+			diag.Warn("scanner cache %s: recreate failed: %v", cacheDir, err)
+		}
+	}
+}
+
 func titleCase(s string) string {
 	if len(s) == 0 {
 		return s
@@ -430,8 +501,12 @@ func titleCase(s string) string {
 	return strings.ToUpper(s[:1]) + strings.ToLower(s[1:])
 }
 
-func runTrivy(ctx context.Context, imageRef, format, output string) error {
-	args := []string{"image", "--format", format, "--output", output, imageRef}
+func runTrivy(ctx context.Context, imageRef, format, output, cacheDir string) error {
+	args := []string{"image", "--format", format, "--output", output}
+	if cacheDir != "" {
+		args = append(args, "--cache-dir", cacheDir)
+	}
+	args = append(args, imageRef)
 	cmd := exec.CommandContext(ctx, "trivy", args...)
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
@@ -528,11 +603,14 @@ func parseTrivyVulnerabilities(jsonPath string, result *ScanResult) error {
 	return nil
 }
 
-func runGrype(ctx context.Context, imageRef, format, output string) error {
+func runGrype(ctx context.Context, imageRef, format, output, cacheDir string) error {
 	args := []string{imageRef, "-o", format, "--file", output, "-v"}
 	cmd := exec.CommandContext(ctx, "grype", args...)
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
+	if cacheDir != "" {
+		cmd.Env = append(os.Environ(), "GRYPE_DB_CACHE_DIR="+cacheDir)
+	}
 	err := cmd.Run()
 	if err != nil {
 		// Grype exits 1 when vulnerabilities are found — output is still valid.

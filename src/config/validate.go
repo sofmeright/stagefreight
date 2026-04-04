@@ -436,6 +436,8 @@ func Validate(cfg *Config) (warnings []string, err error) {
 		{"lint.cache.max_size", cfg.Lint.Cache.MaxSize},
 		{"build_cache.local.retention.max_size", cfg.BuildCache.Local.Retention.MaxSize},
 		{"build_cache.cleanup.prune.build_cache.keep_storage", cfg.BuildCache.Cleanup.Prune.BuildCache.KeepStorage},
+		{"security.cache.trivy.max_size", cfg.Security.Cache.Trivy.MaxSize},
+		{"security.cache.grype.max_size", cfg.Security.Cache.Grype.MaxSize},
 	} {
 		if sv.val != "" {
 			if _, err := ParseSize(sv.val); err != nil {

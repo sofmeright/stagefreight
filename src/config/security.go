@@ -41,6 +41,11 @@ type SecurityConfig struct {
 	// Uses the standard Condition primitive for tag/branch matching with ! negation.
 	ReleaseDetailRules []DetailRule `yaml:"release_detail_rules"`
 
+	// Cache controls persistent vulnerability DB caching per scanner.
+	// Each tool's max_size triggers full-clear when exceeded (opaque DBs, no granular eviction).
+	// Empty/omitted per tool = no StageFreight-managed persistence for that tool.
+	Cache SecurityCacheConfig `yaml:"cache,omitempty"`
+
 	// OverwhelmMessage is the message lines shown when >1000 vulns are found.
 	// Defaults to ["…maybe start here:"] with the OverwhelmLink below.
 	OverwhelmMessage []string `yaml:"overwhelm_message"`
@@ -48,6 +53,21 @@ type SecurityConfig struct {
 	// OverwhelmLink is an optional URL appended after OverwhelmMessage.
 	// Defaults to a Psychology Today anxiety page. Empty string disables.
 	OverwhelmLink string `yaml:"overwhelm_link"`
+}
+
+// SecurityCacheConfig controls persistent vuln DB caching per scanner tool.
+// These are opaque tool-managed directories — StageFreight hosts and bounds them,
+// but does not manage their internal structure.
+type SecurityCacheConfig struct {
+	Trivy ScannerCacheConfig `yaml:"trivy,omitempty"`
+	Grype ScannerCacheConfig `yaml:"grype,omitempty"`
+}
+
+// ScannerCacheConfig is the cache policy for a single scanner.
+// MaxSize set = persistent cache enabled + full-clear when over cap.
+// MaxSize empty = no StageFreight-managed persistence (tool defaults).
+type ScannerCacheConfig struct {
+	MaxSize string `yaml:"max_size,omitempty"` // e.g. "500MB" — full-clear when exceeded
 }
 
 // DetailRule is a conditional override for security detail level in release notes.
