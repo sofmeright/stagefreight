@@ -16,11 +16,119 @@ const StatePath = ".stagefreight/pipeline.json"
 // Each subsystem records what it did; downstream stages read the ledger
 // instead of probing files.
 type State struct {
-	Version  int           `json:"version"`
-	CI       CIState       `json:"ci"`
-	Build    BuildState    `json:"build"`
-	Security SecurityState `json:"security"`
-	Release  ReleaseState  `json:"release"`
+	Version    int              `json:"version"`
+	CI         CIState          `json:"ci"`
+	Build      BuildState       `json:"build"`
+	Security   SecurityState    `json:"security"`
+	Release    ReleaseState     `json:"release"`
+	Subsystems []SubsystemState `json:"subsystems,omitempty"`
+}
+
+// SubsystemState is the generic lifecycle phase record.
+// All subsystems register here regardless of mode. The resolver
+// uses this list — never hardcoded field names.
+type SubsystemState struct {
+	Name         string `json:"name"`
+	Attempted    bool   `json:"attempted"`
+	Completed    bool   `json:"completed"`
+	Skipped      bool   `json:"skipped"`
+	AllowFailure bool   `json:"allow_failure"` // true = non-vital; failure produces warning, not fail
+	Required     bool   `json:"required"`      // true = failure is a hard pipeline fail
+	Outcome      string `json:"outcome"`       // success | failed | skipped | warning | not_applicable | cancelled
+	Reason       string `json:"reason,omitempty"`
+}
+
+// PipelineStatus derives the aggregate pipeline outcome from all subsystems.
+// States: passing, warning, failing, unknown.
+//
+// Resolution rules (platform-agnostic, policy-aware):
+//   - Any required subsystem with outcome "failed" → failing
+//   - Any non-required subsystem with outcome "failed" + allow_failure → warning
+//   - Any subsystem with outcome "warning" → warning
+//   - Nothing attempted → unknown
+//   - Otherwise → passing
+//
+// If the generic Subsystems list is populated, uses that.
+// Otherwise falls back to the typed fields for backward compatibility.
+func (st *State) PipelineStatus() string {
+	subs := st.Subsystems
+	if len(subs) == 0 {
+		subs = st.synthesizeSubsystems()
+	}
+
+	anyAttempted := false
+	hasWarning := false
+
+	for _, s := range subs {
+		if !s.Attempted {
+			continue
+		}
+		anyAttempted = true
+
+		switch s.Outcome {
+		case "failed":
+			if s.AllowFailure {
+				hasWarning = true
+			} else {
+				return "failing"
+			}
+		case "warning":
+			hasWarning = true
+		case "skipped":
+			// Intentional skip is neutral — not a warning unless the subsystem was required.
+			if s.Required {
+				hasWarning = true
+			}
+		case "not_applicable":
+			// Subsystem doesn't apply to this lifecycle mode. Always neutral.
+		}
+	}
+
+	if !anyAttempted {
+		return "unknown"
+	}
+	if hasWarning {
+		return "warning"
+	}
+	return "passing"
+}
+
+// synthesizeSubsystems builds a generic list from the typed fields.
+// Temporary bridge — once all runners call RecordSubsystem, this goes away.
+func (st *State) synthesizeSubsystems() []SubsystemState {
+	var subs []SubsystemState
+	if st.Build.Attempted {
+		subs = append(subs, SubsystemState{
+			Name: "build", Attempted: true, Required: true,
+			Completed: st.Build.Completed,
+			Outcome:   outcomeFromBool(st.Build.Completed, false),
+		})
+	}
+	if st.Security.Attempted {
+		subs = append(subs, SubsystemState{
+			Name: "security", Attempted: true, AllowFailure: true,
+			Completed: st.Security.Completed, Skipped: st.Security.Skipped,
+			Outcome: outcomeFromBool(st.Security.Completed, st.Security.Skipped),
+		})
+	}
+	if st.Release.Attempted {
+		subs = append(subs, SubsystemState{
+			Name: "release", Attempted: true, AllowFailure: true,
+			Completed: st.Release.Completed, Skipped: st.Release.Skipped,
+			Outcome: outcomeFromBool(st.Release.Completed, st.Release.Skipped),
+		})
+	}
+	return subs
+}
+
+func outcomeFromBool(completed, skipped bool) string {
+	if skipped {
+		return "skipped"
+	}
+	if completed {
+		return "success"
+	}
+	return "failed"
 }
 
 // CIState captures the CI environment for this pipeline run.
@@ -107,6 +215,23 @@ func WriteState(rootDir string, st *State) error {
 		return fmt.Errorf("renaming pipeline state: %w", err)
 	}
 	return nil
+}
+
+// RecordSubsystem upserts a subsystem entry by name.
+func (st *State) RecordSubsystem(name string, attempted, completed, skipped bool, reason string) {
+	for i, s := range st.Subsystems {
+		if s.Name == name {
+			st.Subsystems[i] = SubsystemState{
+				Name: name, Attempted: attempted,
+				Completed: completed, Skipped: skipped, Reason: reason,
+			}
+			return
+		}
+	}
+	st.Subsystems = append(st.Subsystems, SubsystemState{
+		Name: name, Attempted: attempted,
+		Completed: completed, Skipped: skipped, Reason: reason,
+	})
 }
 
 // UpdateState does read-modify-write. The caller mutates individual fields

@@ -519,6 +519,15 @@ func docsRunner(ctx context.Context, appCfg *config.Config, ciCtx *ci.CIContext,
 	}
 
 	rootDir := resolveWorkspace(ciCtx)
+
+	// Resolve BUILD_STATUS from pipeline state — not hardcoded in skeleton.
+	// Reads accumulated subsystem state; docs is always the last consumer.
+	if os.Getenv("BUILD_STATUS") == "" || os.Getenv("BUILD_STATUS") == "passing" {
+		if st, err := cistate.ReadState(rootDir); err == nil {
+			os.Setenv("BUILD_STATUS", st.PipelineStatus())
+		}
+	}
+
 	gen := appCfg.Docs.Generators
 
 	if gen.Badges {
@@ -567,6 +576,7 @@ func docsRunner(ctx context.Context, appCfg *config.Config, ciCtx *ci.CIContext,
 
 	return nil
 }
+
 
 // isDocsAutoCommit detects if the current commit was created by StageFreight's docs subsystem.
 // Uses Cue trailer for deterministic detection — not fuzzy message matching.
