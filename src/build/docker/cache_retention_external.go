@@ -82,14 +82,15 @@ func enforceExternalRetention(ctx context.Context, ext config.ExternalCacheConfi
 	result.Path = repoPath
 
 	// Namespace isolation: prefix includes both the configured path AND a repo hash.
-	// This ensures we only prune tags StageFreight created for THIS repo.
-	// Tag pattern: <path>-<branch-canonical> where branch-canonical includes repo hash.
-	// We match on the path prefix — the branch suffix varies.
+	// Tag pattern: <path>-<repo-hash-8>-<branch-canonical>
+	// This ensures we only prune tags StageFreight created for THIS repo,
+	// even on shared cache targets.
 	pathPrefix := ext.Path
 	if pathPrefix == "" {
 		pathPrefix = "cache"
 	}
-	prefix := pathPrefix
+	repoScope := repoHash(repoID)[:8]
+	prefix := fmt.Sprintf("%s-%s", pathPrefix, repoScope)
 	result.Prefix = prefix
 
 	// Find the target config to get provider + credentials.
