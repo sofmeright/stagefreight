@@ -80,6 +80,11 @@ func RunCrucible(ctx context.Context, opts CrucibleOpts) (*CrucibleResult, error
 	// Mount repo directory
 	args = append(args, "-v", opts.RepoDir+":"+opts.RepoDir, "-w", opts.RepoDir)
 
+	// Mount buildx state so crucible can reuse sf-builder from pass 1.
+	// The runner mounts /stagefreight/buildx:/root/.docker/buildx in job containers.
+	// The crucible container needs the same mapping to see existing builders.
+	args = append(args, "-v", "/stagefreight/buildx:/root/.docker/buildx")
+
 	// Recursion guard + run ID
 	args = append(args, "-e", build.CrucibleEnvVar+"=1")
 	args = append(args, "-e", build.CrucibleRunIDEnvVar+"="+opts.RunID)
@@ -91,16 +96,16 @@ func RunCrucible(ctx context.Context, opts CrucibleOpts) (*CrucibleResult, error
 
 	args = append(args, opts.Image)
 
-	// Build the inner stagefreight command with buildx bootstrap.
-	// Uses `docker buildx inspect --bootstrap` to handle both fresh creation
-	// and existing builder cases reliably, waiting until fully ready.
+	// Reuse sf-builder from pass 1 (created by skeleton's .dind-setup).
+	// The buildx state is mounted from /stagefreight/buildx, so sf-builder
+	// is visible. Validate it exists and bootstrap it — no silent fallback.
 	va := VerificationArtifact{Tag: opts.FinalTag}
 	innerFlags := make([]string, 0, len(opts.ExtraFlags)+len(va.AppendFlags()))
 	innerFlags = append(innerFlags, opts.ExtraFlags...)
 	innerFlags = append(innerFlags, va.AppendFlags()...)
 
 	shellCmd := fmt.Sprintf(
-		`docker buildx create --name sf-crucible --driver-opt network=host --use >/dev/null 2>&1; docker buildx inspect --bootstrap >/dev/null 2>&1 || true; mkdir -p .stagefreight/runtime/docker && printf '{"name":"sf-crucible","action":"created","driver":"docker-container","endpoint":"network=host"}\n' > .stagefreight/runtime/docker/builder.json; stagefreight docker build %s`,
+		`docker buildx use sf-builder && docker buildx inspect --bootstrap sf-builder && mkdir -p .stagefreight/runtime/docker && printf '{"name":"sf-builder","action":"reused","driver":"docker-container"}\n' > .stagefreight/runtime/docker/builder.json && stagefreight docker build %s`,
 		strings.Join(innerFlags, " "),
 	)
 	args = append(args, "sh", "-c", shellCmd)
