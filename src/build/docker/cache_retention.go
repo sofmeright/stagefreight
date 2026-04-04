@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/PrPlanIT/StageFreight/src/build/pipeline"
@@ -116,8 +115,12 @@ func enforceLocalRetention(dir string, retention config.LocalRetention) LocalRet
 
 	// Phase 1: prune by max_age.
 	if retention.MaxAge != "" {
-		maxAge, err := parseDuration(retention.MaxAge)
-		if err == nil && maxAge > 0 {
+		maxAge, err := config.ParseDuration(retention.MaxAge)
+		if err != nil {
+			result.Reason = fmt.Sprintf("invalid max_age %q: %v", retention.MaxAge, err)
+			return result
+		}
+		if maxAge > 0 {
 			cutoff := time.Now().Add(-maxAge)
 			for _, e := range entries {
 				info, err := e.Info()
@@ -138,8 +141,12 @@ func enforceLocalRetention(dir string, retention config.LocalRetention) LocalRet
 
 	// Phase 2: enforce max_size by evicting oldest entries.
 	if retention.MaxSize != "" {
-		maxBytes, err := parseSize(retention.MaxSize)
-		if err == nil && maxBytes > 0 {
+		maxBytes, err := config.ParseSize(retention.MaxSize)
+		if err != nil {
+			result.Reason = fmt.Sprintf("invalid max_size %q: %v", retention.MaxSize, err)
+			return result
+		}
+		if maxBytes > 0 {
 			// Re-read after age pruning.
 			entries, _ = os.ReadDir(dir)
 			type entry struct {
@@ -196,43 +203,6 @@ func renderLocalRetention(w interface{ Write([]byte) (int, error) }, color bool,
 	sec.Close()
 }
 
-// parseDuration parses a human duration like "7d", "72h", "30m".
-func parseDuration(s string) (time.Duration, error) {
-	s = strings.TrimSpace(s)
-	if strings.HasSuffix(s, "d") {
-		s = strings.TrimSuffix(s, "d")
-		var days int
-		if _, err := fmt.Sscanf(s, "%d", &days); err != nil {
-			return 0, err
-		}
-		return time.Duration(days) * 24 * time.Hour, nil
-	}
-	return time.ParseDuration(s)
-}
-
-// parseSize parses a human size like "15GB", "500MB".
-func parseSize(s string) (int64, error) {
-	s = strings.TrimSpace(strings.ToUpper(s))
-	var multiplier int64 = 1
-	switch {
-	case strings.HasSuffix(s, "TB"):
-		multiplier = 1024 * 1024 * 1024 * 1024
-		s = strings.TrimSuffix(s, "TB")
-	case strings.HasSuffix(s, "GB"):
-		multiplier = 1024 * 1024 * 1024
-		s = strings.TrimSuffix(s, "GB")
-	case strings.HasSuffix(s, "MB"):
-		multiplier = 1024 * 1024
-		s = strings.TrimSuffix(s, "MB")
-	case strings.HasSuffix(s, "KB"):
-		multiplier = 1024
-		s = strings.TrimSuffix(s, "KB")
-	}
-	var val int64
-	if _, err := fmt.Sscanf(s, "%d", &val); err != nil {
-		return 0, err
-	}
-	return val * multiplier, nil
 }
 
 // dirSize returns the total size of a directory tree.

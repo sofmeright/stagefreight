@@ -151,8 +151,12 @@ func enforceExternalRetention(ctx context.Context, ext config.ExternalCacheConfi
 	// Phase 1: prune by stale_age.
 	var remaining []registry.TagInfo
 	if ext.Retention.StaleAge != "" {
-		maxAge, err := parseDuration(ext.Retention.StaleAge)
-		if err == nil && maxAge > 0 {
+		maxAge, err := config.ParseDuration(ext.Retention.StaleAge)
+		if err != nil {
+			result.Errors = append(result.Errors, fmt.Sprintf("invalid stale_age %q: %v", ext.Retention.StaleAge, err))
+			return result
+		}
+		if maxAge > 0 {
 			cutoff := time.Now().Add(-maxAge)
 			for _, t := range cacheTags {
 				if t.CreatedAt.Before(cutoff) {

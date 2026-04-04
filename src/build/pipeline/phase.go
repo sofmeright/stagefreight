@@ -182,11 +182,16 @@ func runPreBuildLintImpl(ctx context.Context, rootDir string, appCfg *config.Con
 	// Touch-on-read (in Cache.Get) marks active entries, so eviction
 	// only removes dead entries (old file versions never read again).
 	evictResult := cache.Evict(appCfg.Lint.Cache.MaxAge, appCfg.Lint.Cache.MaxSize)
-	if evictResult.Evicted > 0 {
+	if evictResult.Evicted > 0 || evictResult.Reason != "" {
 		sec = output.NewSection(w, "Lint Cache Eviction", 0, color)
-		sec.Row("%-14s%d", "before", evictResult.EntriesBefore)
-		sec.Row("%-14s%d", "evicted", evictResult.Evicted)
-		sec.Row("%-14s%s", "reclaimed", formatEvictBytes(evictResult.EvictedBytes))
+		if evictResult.Reason != "" {
+			sec.Row("%-14s%s", "status", "skipped")
+			sec.Row("%-14s%s", "reason", evictResult.Reason)
+		} else {
+			sec.Row("%-14s%d", "before", evictResult.EntriesBefore)
+			sec.Row("%-14s%d", "evicted", evictResult.Evicted)
+			sec.Row("%-14s%s", "reclaimed", formatEvictBytes(evictResult.EvictedBytes))
+		}
 		sec.Close()
 	}
 

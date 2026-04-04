@@ -50,16 +50,24 @@ func pruneBuildkitCache(builder string, retention config.LocalRetention, verbose
 	args := []string{"buildx", "prune", "--builder", builder, "--force"}
 
 	if retention.MaxAge != "" {
-		dur, err := parseDuration(retention.MaxAge)
-		if err == nil && dur > 0 {
+		dur, err := config.ParseDuration(retention.MaxAge)
+		if err != nil {
+			result.Error = fmt.Errorf("invalid max_age %q: %w", retention.MaxAge, err)
+			return result
+		}
+		if dur > 0 {
 			result.MaxAge = formatDurationHuman(dur)
 			args = append(args, "--filter", fmt.Sprintf("until=%s", formatDurationHuman(dur)))
 		}
 	}
 
 	if retention.MaxSize != "" {
-		bytes, err := parseSize(retention.MaxSize)
-		if err == nil && bytes > 0 {
+		bytes, err := config.ParseSize(retention.MaxSize)
+		if err != nil {
+			result.Error = fmt.Errorf("invalid max_size %q: %w", retention.MaxSize, err)
+			return result
+		}
+		if bytes > 0 {
 			result.KeepBytes = bytes
 			args = append(args, "--keep-storage", fmt.Sprintf("%d", bytes))
 		}

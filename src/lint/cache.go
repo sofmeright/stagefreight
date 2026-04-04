@@ -8,8 +8,9 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 	"time"
+
+	"github.com/PrPlanIT/StageFreight/src/config"
 )
 
 // cacheSchemaVersion is bumped whenever the cache entry format or
@@ -214,8 +215,12 @@ func (c *Cache) Evict(maxAge string, maxSize string) EvictResult {
 
 	// Phase 1: evict by age.
 	if maxAge != "" {
-		ageDur, err := parseCacheDuration(maxAge)
-		if err == nil && ageDur > 0 {
+		ageDur, err := config.ParseDuration(maxAge)
+		if err != nil {
+			result.Reason = fmt.Sprintf("invalid max_age %q: %v", maxAge, err)
+			return result
+		}
+		if ageDur > 0 {
 			cutoff := time.Now().Add(-ageDur)
 			var surviving []entry
 			for _, e := range entries {
@@ -235,8 +240,12 @@ func (c *Cache) Evict(maxAge string, maxSize string) EvictResult {
 
 	// Phase 2: enforce size cap — evict oldest first until under limit.
 	if maxSize != "" {
-		maxBytes, err := parseCacheSize(maxSize)
-		if err == nil && maxBytes > 0 && totalSize > maxBytes {
+		maxBytes, err := config.ParseSize(maxSize)
+		if err != nil {
+			result.Reason = fmt.Sprintf("invalid max_size %q: %v", maxSize, err)
+			return result
+		}
+		if maxBytes > 0 && totalSize > maxBytes {
 			sort.Slice(entries, func(i, j int) bool {
 				return entries[i].modTime.Before(entries[j].modTime)
 			})
@@ -254,42 +263,6 @@ func (c *Cache) Evict(maxAge string, maxSize string) EvictResult {
 	}
 
 	return result
-}
-
-// parseCacheDuration parses "7d", "72h", "30m" etc.
-func parseCacheDuration(s string) (time.Duration, error) {
-	s = strings.TrimSpace(s)
-	if strings.HasSuffix(s, "d") {
-		s = strings.TrimSuffix(s, "d")
-		var days int
-		if _, err := fmt.Sscanf(s, "%d", &days); err != nil {
-			return 0, err
-		}
-		return time.Duration(days) * 24 * time.Hour, nil
-	}
-	return time.ParseDuration(s)
-}
-
-// parseCacheSize parses "100MB", "1GB" etc.
-func parseCacheSize(s string) (int64, error) {
-	s = strings.TrimSpace(strings.ToUpper(s))
-	var multiplier int64 = 1
-	switch {
-	case strings.HasSuffix(s, "GB"):
-		multiplier = 1024 * 1024 * 1024
-		s = strings.TrimSuffix(s, "GB")
-	case strings.HasSuffix(s, "MB"):
-		multiplier = 1024 * 1024
-		s = strings.TrimSuffix(s, "MB")
-	case strings.HasSuffix(s, "KB"):
-		multiplier = 1024
-		s = strings.TrimSuffix(s, "KB")
-	}
-	var val int64
-	if _, err := fmt.Sscanf(s, "%d", &val); err != nil {
-		return 0, err
-	}
-	return val * multiplier, nil
 }
 
 // Clear removes the entire cache directory.
