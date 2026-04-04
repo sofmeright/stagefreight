@@ -565,6 +565,7 @@ commit:
 | Name | YAML Key | Type | Required | Default | Description |
 |------|----------|------|----------|---------|-------------|
 | `mode` | `mode` | string | No | — | string value |
+| `backend` | `builder.backend` | string | No | — | string value |
 | `name` | `builder.name` | string | No | — | string value |
 | `driver` | `builder.driver` | string | No | — | string value |
 | `context` | `builder.context` | string | No | — | string value |
