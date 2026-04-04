@@ -413,6 +413,37 @@ func Validate(cfg *Config) (warnings []string, err error) {
 		}
 	}
 
+	// ── Duration/Size unit validation ───────────────────────────────────
+	// Reject invalid values at load time, not at consumption time.
+
+	for _, dv := range []struct{ path, val string }{
+		{"lint.cache.max_age", cfg.Lint.Cache.MaxAge},
+		{"build_cache.local.retention.max_age", cfg.BuildCache.Local.Retention.MaxAge},
+		{"build_cache.external.retention.stale_age", cfg.BuildCache.External.Retention.StaleAge},
+		{"build_cache.cleanup.prune.images.dangling.older_than", cfg.BuildCache.Cleanup.Prune.Images.Dangling.OlderThan},
+		{"build_cache.cleanup.prune.images.unreferenced.older_than", cfg.BuildCache.Cleanup.Prune.Images.Unreferenced.OlderThan},
+		{"build_cache.cleanup.prune.build_cache.older_than", cfg.BuildCache.Cleanup.Prune.BuildCache.OlderThan},
+		{"build_cache.cleanup.prune.containers.exited.older_than", cfg.BuildCache.Cleanup.Prune.Containers.Exited.OlderThan},
+	} {
+		if dv.val != "" {
+			if _, err := ParseDuration(dv.val); err != nil {
+				errs = append(errs, fmt.Sprintf("%s: %v", dv.path, err))
+			}
+		}
+	}
+
+	for _, sv := range []struct{ path, val string }{
+		{"lint.cache.max_size", cfg.Lint.Cache.MaxSize},
+		{"build_cache.local.retention.max_size", cfg.BuildCache.Local.Retention.MaxSize},
+		{"build_cache.cleanup.prune.build_cache.keep_storage", cfg.BuildCache.Cleanup.Prune.BuildCache.KeepStorage},
+	} {
+		if sv.val != "" {
+			if _, err := ParseSize(sv.val); err != nil {
+				errs = append(errs, fmt.Sprintf("%s: %v", sv.path, err))
+			}
+		}
+	}
+
 	if len(errs) > 0 {
 		return warnings, fmt.Errorf("%s", strings.Join(errs, "; "))
 	}

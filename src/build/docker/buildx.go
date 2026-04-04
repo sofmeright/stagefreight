@@ -269,14 +269,13 @@ func resolvePublished(step build.BuildStep) ([]artifact.PublishedImage, error) {
 	}
 
 	// Verify: actual pushed count must match expected.
-	// If image.name is empty but digest exists, buildx may have pushed without recording
-	// ref names (older buildx versions). Warn but proceed — digest is the real truth.
-	if actualCount > 0 && actualCount != len(expected) {
+	// image.name is required — buildx 0.8+ always writes it on successful push.
+	if actualCount == 0 {
+		return nil, fmt.Errorf("buildx metadata has digest but no image.name — cannot verify what was actually pushed")
+	}
+	if actualCount != len(expected) {
 		return nil, fmt.Errorf("publish count mismatch: expected %d refs, buildx reported %d — partial push or config drift",
 			len(expected), actualCount)
-	}
-	if actualCount == 0 && meta.ImageName == "" {
-		diag.Warn("buildx metadata has digest but no image.name — cannot verify ref count (older buildx?)")
 	}
 
 	return expected, nil
