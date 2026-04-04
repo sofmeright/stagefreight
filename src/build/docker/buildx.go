@@ -19,22 +19,40 @@ import (
 )
 
 // buildPublishedImages creates structured publish records from a build step.
-// Authoritative — derived from step registries + tags, not reparsed from strings.
+// step.Tags are full image refs (e.g., "docker.io/prplanit/stagefreight:dev-abc123").
+// We parse each tag into structured fields. Registries provide Provider metadata.
 func buildPublishedImages(step build.BuildStep) []artifact.PublishedImage {
-	if !step.Push || len(step.Registries) == 0 {
+	if !step.Push {
 		return nil
 	}
-	var images []artifact.PublishedImage
+
+	// Build a provider lookup from registries.
+	providerByHost := make(map[string]string)
 	for _, reg := range step.Registries {
-		for _, tag := range step.Tags {
-			images = append(images, artifact.PublishedImage{
-				Host:     reg.URL,
-				Path:     reg.Path,
-				Tag:      tag,
-				Provider: reg.Provider,
-				Ref:      fmt.Sprintf("%s/%s:%s", reg.URL, reg.Path, tag),
-			})
+		providerByHost[strings.ToLower(reg.URL)] = reg.Provider
+	}
+
+	var images []artifact.PublishedImage
+	for _, fullRef := range step.Tags {
+		img := artifact.PublishedImage{Ref: fullRef}
+
+		// Parse host/path:tag from the full ref.
+		ref := fullRef
+		if idx := strings.LastIndex(ref, ":"); idx > 0 && !strings.Contains(ref[idx:], "/") {
+			img.Tag = ref[idx+1:]
+			ref = ref[:idx]
 		}
+		parts := strings.SplitN(ref, "/", 2)
+		if len(parts) == 2 && (strings.Contains(parts[0], ".") || strings.Contains(parts[0], ":")) {
+			img.Host = strings.ToLower(parts[0])
+			img.Path = parts[1]
+		} else {
+			img.Host = "docker.io"
+			img.Path = ref
+		}
+
+		img.Provider = providerByHost[img.Host]
+		images = append(images, img)
 	}
 	return images
 }
