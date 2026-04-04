@@ -104,8 +104,11 @@ func RunCrucible(ctx context.Context, opts CrucibleOpts) (*CrucibleResult, error
 	innerFlags = append(innerFlags, opts.ExtraFlags...)
 	innerFlags = append(innerFlags, va.AppendFlags()...)
 
+	// sf-builder's endpoint is tls-context (created by skeleton in pass 1).
+	// The crucible container has the certs and DOCKER_HOST but not the context.
+	// Recreate it before using the builder.
 	shellCmd := fmt.Sprintf(
-		`docker buildx use sf-builder && docker buildx inspect --bootstrap sf-builder && mkdir -p .stagefreight/runtime/docker && printf '{"name":"sf-builder","action":"reused","driver":"docker-container"}\n' > .stagefreight/runtime/docker/builder.json && stagefreight docker build %s`,
+		`docker context create tls-context --docker "host=$DOCKER_HOST,ca=$DOCKER_CERT_PATH/ca.pem,cert=$DOCKER_CERT_PATH/cert.pem,key=$DOCKER_CERT_PATH/key.pem" 2>/dev/null || true && docker buildx use sf-builder && docker buildx inspect --bootstrap sf-builder && mkdir -p .stagefreight/runtime/docker && printf '{"name":"sf-builder","action":"reused","driver":"docker-container"}\n' > .stagefreight/runtime/docker/builder.json && stagefreight docker build %s`,
 		strings.Join(innerFlags, " "),
 	)
 	args = append(args, "sh", "-c", shellCmd)
