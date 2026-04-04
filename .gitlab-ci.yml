@@ -31,7 +31,7 @@ workflow:
     if docker buildx inspect sf-builder >/dev/null 2>&1; then
       mkdir -p .stagefreight/runtime/docker && printf '{"name":"sf-builder","action":"reused","driver":"docker-container","endpoint":"tls-context"}\n' > .stagefreight/runtime/docker/builder.json
     else
-      docker buildx create --name sf-builder --driver docker-container --driver-opt "mount=/stagefreight:/stagefreight" --use tls-context
+      docker buildx create --name sf-builder --driver docker-container --use tls-context
       mkdir -p .stagefreight/runtime/docker && printf '{"name":"sf-builder","action":"created","driver":"docker-container","endpoint":"tls-context"}\n' > .stagefreight/runtime/docker/builder.json
     fi
   - docker buildx use sf-builder
