@@ -56,6 +56,7 @@
 - [`stagefreight release create`](#cli-stagefreight-release-create) — Create a release on the forge and sync to targets
 - [`stagefreight release notes`](#cli-stagefreight-release-notes) — Generate release notes from conventional commits
 - [`stagefreight release prune`](#cli-stagefreight-release-prune) — Prune old releases using retention policy
+- [`stagefreight release sync`](#cli-stagefreight-release-sync) — Project releases from primary forge to mirrors
 - [`stagefreight security`](#cli-stagefreight-security) — Security scanning commands
 - [`stagefreight security scan`](#cli-stagefreight-security-scan) — Run vulnerability scan and generate SBOM
 - [`stagefreight tag`](#cli-stagefreight-tag) — Plan, validate, and create a release tag
@@ -1544,8 +1545,9 @@ Create releases, generate notes, update badges, and sync across forges.
 - [`create`](#cli-stagefreight-release-create) — Create a release on the forge and sync to targets
 - [`notes`](#cli-stagefreight-release-notes) — Generate release notes from conventional commits
 - [`prune`](#cli-stagefreight-release-prune) — Prune old releases using retention policy
+- [`sync`](#cli-stagefreight-release-sync) — Project releases from primary forge to mirrors
 
-**See also:** [`stagefreight`](#cli-stagefreight) · [`stagefreight release create`](#cli-stagefreight-release-create) · [`stagefreight release notes`](#cli-stagefreight-release-notes) · [`stagefreight release prune`](#cli-stagefreight-release-prune)
+**See also:** [`stagefreight`](#cli-stagefreight) · [`stagefreight release create`](#cli-stagefreight-release-create) · [`stagefreight release notes`](#cli-stagefreight-release-notes) · [`stagefreight release prune`](#cli-stagefreight-release-prune) · [`stagefreight release sync`](#cli-stagefreight-release-sync)
 
 ---
 
@@ -1583,7 +1585,7 @@ unless --skip-sync is set.
 | `--config` | string | — | config file (default: .stagefreight.yml) |
 | `-v, --verbose` | bool | — | verbose output |
 
-**See also:** [`stagefreight release`](#cli-stagefreight-release) · [`stagefreight release notes`](#cli-stagefreight-release-notes) · [`stagefreight release prune`](#cli-stagefreight-release-prune)
+**See also:** [`stagefreight release`](#cli-stagefreight-release) · [`stagefreight release notes`](#cli-stagefreight-release-notes) · [`stagefreight release prune`](#cli-stagefreight-release-prune) · [`stagefreight release sync`](#cli-stagefreight-release-sync)
 
 ---
 
@@ -1616,7 +1618,7 @@ If --to is omitted, defaults to HEAD.
 | `--config` | string | — | config file (default: .stagefreight.yml) |
 | `-v, --verbose` | bool | — | verbose output |
 
-**See also:** [`stagefreight release`](#cli-stagefreight-release) · [`stagefreight release create`](#cli-stagefreight-release-create) · [`stagefreight release prune`](#cli-stagefreight-release-prune)
+**See also:** [`stagefreight release`](#cli-stagefreight-release) · [`stagefreight release create`](#cli-stagefreight-release-create) · [`stagefreight release prune`](#cli-stagefreight-release-prune) · [`stagefreight release sync`](#cli-stagefreight-release-sync)
 
 ---
 
@@ -1646,7 +1648,35 @@ Use --dry-run to preview what would be deleted without deleting.
 | `--config` | string | — | config file (default: .stagefreight.yml) |
 | `-v, --verbose` | bool | — | verbose output |
 
-**See also:** [`stagefreight release`](#cli-stagefreight-release) · [`stagefreight release create`](#cli-stagefreight-release-create) · [`stagefreight release notes`](#cli-stagefreight-release-notes)
+**See also:** [`stagefreight release`](#cli-stagefreight-release) · [`stagefreight release create`](#cli-stagefreight-release-create) · [`stagefreight release notes`](#cli-stagefreight-release-notes) · [`stagefreight release sync`](#cli-stagefreight-release-sync)
+
+---
+
+<a id="cli-stagefreight-release-sync" name="cli-stagefreight-release-sync"></a>
+### stagefreight release sync
+
+**Usage:** `stagefreight release sync sync`
+
+Reads releases from the primary forge and projects missing ones
+to mirrors that declare sync.releases: true.
+
+Use --dry-run to preview what would be created without making changes.
+Without --dry-run, missing releases are created on each mirror.
+
+**Flags:**
+
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| `--dry-run` | bool | — | Preview only, do not create releases |
+
+**Inherited flags:**
+
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| `--config` | string | — | config file (default: .stagefreight.yml) |
+| `-v, --verbose` | bool | — | verbose output |
+
+**See also:** [`stagefreight release`](#cli-stagefreight-release) · [`stagefreight release create`](#cli-stagefreight-release-create) · [`stagefreight release notes`](#cli-stagefreight-release-notes) · [`stagefreight release prune`](#cli-stagefreight-release-prune)
 
 ---
 

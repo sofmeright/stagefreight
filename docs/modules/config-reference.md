@@ -212,6 +212,7 @@ Distribution targets and side-effects. Each target has a `kind` that determines 
 | `catalog` | `catalog` | bool | No | — | Enable GitLab Catalog registration. `kind: gitlab-component` only. |
 | `aliases` | `aliases` | []string | No | — | Rolling git tag aliases. `kind: release` only. |
 | `project_id` | `project_id` | string | No | — | Project identifier (`owner/repo` or numeric ID). `kind: release`, remote targets only. |
+| `mirror` | `mirror` | string | No | — | string value |
 | `sync_release` | `sync_release` | bool | No | — | Sync release notes + tags to a remote forge. `kind: release`, remote targets only. |
 | `sync_assets` | `sync_assets` | bool | No | — | Sync scan artifacts to a remote forge. `kind: release`, remote targets only. |
 | `archives` | `archives` | string | No | — | string value |
