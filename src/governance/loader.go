@@ -11,23 +11,31 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// LoadGovernance fetches the policy repo at the pinned ref,
-// parses clusters.yml, and returns a preset loader rooted in the checkout.
+// LoadGovernance loads governance config and returns a preset loader.
+// When source.LocalPath is set (CI mode), uses the local checkout directly.
+// Otherwise, fetches the policy repo at the pinned ref.
 // Ref must be pinned (tag or commit SHA) unless AllowFloating is true.
 func LoadGovernance(source GovernanceSource) (*GovernanceConfig, PresetLoader, error) {
-	if err := ValidateRef(source.Ref, source.AllowFloating); err != nil {
-		return nil, nil, fmt.Errorf("governance source: %w", err)
+	var checkoutDir string
+
+	if source.LocalPath != "" {
+		// CI mode — repo is already checked out at the correct ref.
+		checkoutDir = source.LocalPath
+	} else {
+		if err := ValidateRef(source.Ref, source.AllowFloating); err != nil {
+			return nil, nil, fmt.Errorf("governance source: %w", err)
+		}
+
+		var err error
+		checkoutDir, err = fetchRepo(source.RepoURL, source.Ref)
+		if err != nil {
+			return nil, nil, fmt.Errorf("fetching policy repo: %w", err)
+		}
 	}
 
-	// Clone/fetch policy repo at pinned ref into temp dir.
-	checkoutDir, err := fetchRepo(source.RepoURL, source.Ref)
-	if err != nil {
-		return nil, nil, fmt.Errorf("fetching policy repo: %w", err)
-	}
-
-	// Parse clusters.yml.
-	clustersPath := filepath.Join(checkoutDir, source.Path)
-	gov, err := parseClusters(clustersPath)
+	// Parse governance config.
+	configPath := filepath.Join(checkoutDir, source.Path)
+	gov, err := parseClusters(configPath)
 	if err != nil {
 		return nil, nil, fmt.Errorf("parsing governance config: %w", err)
 	}

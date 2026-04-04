@@ -8,8 +8,9 @@ package governance
 type GovernanceSource struct {
 	RepoURL       string `yaml:"repo_url"`       // policy repo URL
 	Ref           string `yaml:"ref"`             // pinned tag or commit SHA (required)
-	Path          string `yaml:"path"`            // path to clusters.yml within repo
+	Path          string `yaml:"path"`            // path to governance config within repo
 	AllowFloating bool   `yaml:"allow_floating"`  // if true, branch refs allowed (dev/unsafe)
+	LocalPath     string `yaml:"-"`               // if set, use local checkout instead of cloning
 }
 
 // GovernanceConfig is the parsed clusters.yml from the policy repo.

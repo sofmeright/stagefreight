@@ -3,10 +3,12 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/PrPlanIT/StageFreight/src/ci"
 	"github.com/PrPlanIT/StageFreight/src/forge"
 	"github.com/PrPlanIT/StageFreight/src/governance"
 )
@@ -74,6 +76,11 @@ func runGovernanceReconcile(cmd *cobra.Command, args []string) error {
 	fmt.Fprintf(os.Stderr, "\nPlanning distribution for %d repos...\n", totalRepos)
 
 	sourceIdentity := extractIdentity(source.RepoURL)
+
+	// Auto-resolve forge URL from CI repo URL when not set via flags.
+	if govForgeURL == "" {
+		govForgeURL = extractForgeBaseURL(source.RepoURL)
+	}
 
 	// Build forge adapter for drift detection + commits.
 	// Single factory, single adapter — used for both read and write.
@@ -165,7 +172,11 @@ func runGovernanceReconcile(cmd *cobra.Command, args []string) error {
 	return err
 }
 
-// resolveGovernanceSource determines the governance source from CLI flags or config.
+// resolveGovernanceSource determines the governance source from CLI flags, CI context, or config.
+// When running in CI inside a governance repo, auto-resolves from the CI environment:
+//   - RepoURL from SF_CI_REPO_URL
+//   - Ref from SF_CI_SHA (pinned to exact commit)
+//   - LocalPath from SF_CI_WORKSPACE (avoids redundant clone)
 func resolveGovernanceSource() (governance.GovernanceSource, error) {
 	source := governance.GovernanceSource{}
 
@@ -180,15 +191,27 @@ func resolveGovernanceSource() (governance.GovernanceSource, error) {
 		source.Path = govPath
 	}
 
-	// Fall back to config if available.
-	if cfg != nil {
-		// TODO: read governance.source from parsed config once the field exists.
-		// For now, CLI flags are required.
+	// CI context fallback: when lifecycle.mode == governance and running in CI,
+	// the governance repo is the current repo at the current commit.
+	if cfg != nil && cfg.Lifecycle.Mode == "governance" {
+		ciCtx := ci.ResolveContext()
+		if ciCtx.IsCI() {
+			if source.RepoURL == "" {
+				source.RepoURL = ciCtx.RepoURL
+			}
+			if source.Ref == "" {
+				source.Ref = ciCtx.SHA
+			}
+			// Use local checkout — repo is already checked out at this SHA.
+			if ciCtx.Workspace != "" {
+				source.LocalPath = ciCtx.Workspace
+			}
+		}
 	}
 
-	// Defaults.
+	// Default path: governance is embedded in .stagefreight.yml.
 	if source.Path == "" {
-		source.Path = "governance/clusters.yml"
+		source.Path = ".stagefreight.yml"
 	}
 
 	if source.RepoURL == "" {
@@ -199,6 +222,29 @@ func resolveGovernanceSource() (governance.GovernanceSource, error) {
 	}
 
 	return source, nil
+}
+
+// extractForgeBaseURL extracts "https://host" from a full repo URL.
+// Returns empty string if the URL can't be parsed.
+func extractForgeBaseURL(repoURL string) string {
+	if repoURL == "" {
+		return ""
+	}
+	// Handle https:// and http:// URLs.
+	if strings.HasPrefix(repoURL, "https://") || strings.HasPrefix(repoURL, "http://") {
+		u, err := url.Parse(repoURL)
+		if err != nil {
+			return ""
+		}
+		return u.Scheme + "://" + u.Host
+	}
+	// Handle git@host:path or ssh://git@host:port/path.
+	s := strings.TrimPrefix(repoURL, "ssh://")
+	s = strings.TrimPrefix(s, "git@")
+	if idx := strings.IndexAny(s, ":/"); idx >= 0 {
+		return "https://" + s[:idx]
+	}
+	return ""
 }
 
 // extractIdentity extracts "org/repo" from a full URL.

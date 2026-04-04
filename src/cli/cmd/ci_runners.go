@@ -1143,12 +1143,15 @@ func reconcileRunner(_ context.Context, appCfg *config.Config, ciCtx *ci.CIConte
 		}
 	}
 
-	// Governance reconcile — requires clusters AND source configured.
+	// Governance reconcile — requires clusters AND source resolvable.
 	// Not mutually exclusive with gitops — both can run.
+	// In CI, source is auto-resolved from CI context and apply is implicit.
 	if hasGovernanceClusters {
 		if !hasGovernanceSource {
 			renderCISkip("Reconcile", start, "governance source not configured")
 		} else {
+			// CI implies --apply: the reconcile stage exists to apply.
+			govApply = true
 			if err := runGovernanceReconcile(&cobra.Command{}, []string{}); err != nil {
 				return err
 			}
