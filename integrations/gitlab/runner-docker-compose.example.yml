@@ -56,6 +56,7 @@ services:
             --docker-privileged=true \
             --docker-volumes=/certs/client \
             --docker-volumes=/stagefreight:/stagefreight \
+            --docker-volumes=/stagefreight/buildx:/root/.docker/buildx \
             --executor=docker \
             --name=$${RUNNER_NAME:-"StageFreight Runner"} \
             --non-interactive \

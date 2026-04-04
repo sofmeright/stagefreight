@@ -32,8 +32,8 @@ workflow:
 
 .dind-setup: &dind-setup
   - docker context create tls-context --docker "host=$DOCKER_HOST,ca=$DOCKER_CERT_PATH/ca.pem,cert=$DOCKER_CERT_PATH/cert.pem,key=$DOCKER_CERT_PATH/key.pem" 2>/dev/null || true
-  - docker buildx rm sf-builder >/dev/null 2>&1 || true
-  - docker buildx create --name sf-builder --driver docker-container --use tls-context
+  - docker buildx inspect sf-builder >/dev/null 2>&1 || docker buildx create --name sf-builder --driver docker-container --use tls-context
+  - docker buildx use sf-builder
   - docker buildx inspect --bootstrap
 
 .dind-variables: &dind-variables
