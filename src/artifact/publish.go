@@ -113,7 +113,14 @@ func normalizeHost(h string) string {
 	return strings.ToLower(h)
 }
 
-// WritePublishManifest writes the publish manifest and its SHA-256 checksum sidecar.
+// canonicalJSON marshals a value in the canonical format used for checksum computation.
+// This function is the single definition of "canonical" for all publish manifest
+// integrity operations. If you change the format here, all existing checksums break.
+func canonicalJSON(v any) ([]byte, error) {
+	return json.MarshalIndent(v, "", "  ")
+}
+
+// WritePublishManifest writes the publish manifest with an embedded SHA-256 checksum.
 // Canonicalizes Ref, deduplicates by host/path:tag, sorts deterministically,
 // and sets timestamp if empty.
 func WritePublishManifest(dir string, manifest PublishManifest) error {
@@ -163,9 +170,9 @@ func WritePublishManifest(dir string, manifest PublishManifest) error {
 		manifest.Timestamp = time.Now().UTC().Format(time.RFC3339)
 	}
 
-	// Compute embedded checksum: marshal without checksum, hash, then set it.
+	// Compute embedded checksum: canonical marshal without checksum, hash, then set it.
 	manifest.Checksum = ""
-	canonical, err := json.MarshalIndent(manifest, "", "  ")
+	canonical, err := canonicalJSON(manifest)
 	if err != nil {
 		return fmt.Errorf("marshaling publish manifest: %w", err)
 	}
@@ -173,7 +180,7 @@ func WritePublishManifest(dir string, manifest PublishManifest) error {
 	manifest.Checksum = hex.EncodeToString(hash[:])
 
 	// Final marshal with checksum embedded.
-	data, err := json.MarshalIndent(manifest, "", "  ")
+	data, err := canonicalJSON(manifest)
 	if err != nil {
 		return fmt.Errorf("marshaling publish manifest: %w", err)
 	}
@@ -212,10 +219,10 @@ func ReadPublishManifest(dir string) (*PublishManifest, error) {
 	}
 
 	if manifest.Checksum != "" {
-		// Embedded checksum: verify by re-marshaling without checksum and comparing.
+		// Embedded checksum: verify by canonical re-marshal without checksum.
 		expectedHex := manifest.Checksum
 		manifest.Checksum = ""
-		canonical, err := json.MarshalIndent(manifest, "", "  ")
+		canonical, err := canonicalJSON(manifest)
 		if err != nil {
 			return nil, fmt.Errorf("%w: re-marshaling for verification: %v", ErrPublishManifestInvalid, err)
 		}
