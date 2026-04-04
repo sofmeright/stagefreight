@@ -63,8 +63,9 @@ func runGovernanceReconcile(cmd *cobra.Command, args []string) error {
 	fmt.Fprintf(os.Stderr, "  clusters: %d\n", len(gov.Clusters))
 	totalRepos := 0
 	for _, c := range gov.Clusters {
-		totalRepos += len(c.Targets.Repos)
-		fmt.Fprintf(os.Stderr, "  cluster %q: %d repos\n", c.ID, len(c.Targets.Repos))
+		n := len(c.Targets.AllRepos())
+		totalRepos += n
+		fmt.Fprintf(os.Stderr, "  cluster %q: %d repos\n", c.ID, n)
 	}
 
 	// Phase 2: Plan distribution.

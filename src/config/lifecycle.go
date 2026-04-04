@@ -21,6 +21,14 @@ type GovernanceCluster struct {
 }
 
 // GovernanceClusterTargets identifies which repos belong to this cluster.
+// Supports flat repos list and/or grouped targets with per-group forge identity.
 type GovernanceClusterTargets struct {
+	Repos  []string                     `yaml:"repos,omitempty"`
+	Groups []GovernanceClusterGroup     `yaml:"groups,omitempty"`
+}
+
+// GovernanceClusterGroup is a cohort of repos on the same forge.
+type GovernanceClusterGroup struct {
+	ID    string   `yaml:"id,omitempty"`
 	Repos []string `yaml:"repos"`
 }

@@ -166,7 +166,7 @@ func RenderPlanView(w io.Writer, data PlanViewData) {
 
 	totalRepos := 0
 	for _, c := range data.Clusters {
-		totalRepos += len(c.Targets.Repos)
+		totalRepos += len(c.Targets.AllRepos())
 	}
 	row(w, "%-13s%d", "clusters", len(data.Clusters))
 	row(w, "%-13s%d", "repos", totalRepos)
@@ -178,9 +178,10 @@ func RenderPlanView(w io.Writer, data PlanViewData) {
 	var totalRepoCounts repoCounts
 
 	for _, cluster := range data.Clusters {
+		allRepos := cluster.Targets.AllRepos()
 		clusterFileCount := 0
-		for _, repo := range cluster.Targets.Repos {
-			if p, ok := data.Plans[repo]; ok {
+		for _, resolved := range allRepos {
+			if p, ok := data.Plans[resolved.ID]; ok {
 				for _, f := range p.Files {
 					if f.Action != "unchanged" {
 						clusterFileCount++
@@ -190,14 +191,14 @@ func RenderPlanView(w io.Writer, data PlanViewData) {
 		}
 
 		repoWord := "repos"
-		if len(cluster.Targets.Repos) == 1 {
+		if len(allRepos) == 1 {
 			repoWord = "repo"
 		}
 		fmt.Fprintf(w, "    │\n")
 		row(w, "%s%s%d %s · %d files",
 			cluster.ID,
 			strings.Repeat(" ", max(1, 40-len(cluster.ID))),
-			len(cluster.Targets.Repos), repoWord, clusterFileCount)
+			len(allRepos), repoWord, clusterFileCount)
 
 		// Group repos by state + file signature.
 		groups := groupRepos(cluster, data)
@@ -260,7 +261,8 @@ func groupRepos(cluster Cluster, data PlanViewData) []repoGroup {
 	keyOrder := []groupKey{}
 	groups := map[groupKey]*repoGroup{}
 
-	for _, repo := range cluster.Targets.Repos {
+	for _, resolved := range cluster.Targets.AllRepos() {
+		repo := resolved.ID
 		plan, ok := data.Plans[repo]
 		if !ok {
 			continue

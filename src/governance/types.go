@@ -3,6 +3,11 @@
 // capability detection, and execution gating.
 package governance
 
+import (
+	"fmt"
+	"strings"
+)
+
 // GovernanceSource declares where governance inputs come from.
 // Declared in .stagefreight.yml under governance.source.
 type GovernanceSource struct {
@@ -29,8 +34,78 @@ type Cluster struct {
 }
 
 // ClusterTargets identifies which repos belong to this cluster.
+// Two forms:
+//   - Flat: targets.repos (string list, inherits governance sources.primary forge)
+//   - Grouped: targets.groups (each group declares its own forge source)
 type ClusterTargets struct {
-	Repos []string `yaml:"repos"` // "org/repo" or "org/group/repo"
+	Repos  []string      `yaml:"repos,omitempty"`  // shorthand: flat list, inherited forge
+	Groups []TargetGroup `yaml:"groups,omitempty"` // explicit: per-group forge identity
+}
+
+// AllRepos flattens both forms into a unified list for iteration.
+// Flat repos get empty ForgeURL (inherit from governance sources.primary).
+// Group repos get the group's declared forge URL.
+func (ct ClusterTargets) AllRepos() []ResolvedRepo {
+	var result []ResolvedRepo
+	for _, repo := range ct.Repos {
+		result = append(result, ResolvedRepo{ID: repo})
+	}
+	for _, g := range ct.Groups {
+		forgeURL := ""
+		if g.Sources != nil {
+			forgeURL = g.Sources.Primary.URL
+		}
+		for _, repo := range g.Repos {
+			result = append(result, ResolvedRepo{ID: repo, ForgeURL: forgeURL})
+		}
+	}
+	return result
+}
+
+// ValidateTargets checks that group forge URLs are base URLs only (no path).
+// Prevents ambiguity between forge base URL and full repo URL.
+func (ct ClusterTargets) ValidateTargets() error {
+	for _, g := range ct.Groups {
+		if g.Sources == nil || g.Sources.Primary.URL == "" {
+			continue
+		}
+		u := g.Sources.Primary.URL
+		// Strip scheme and check for path beyond host.
+		stripped := u
+		for _, prefix := range []string{"https://", "http://"} {
+			stripped = strings.TrimPrefix(stripped, prefix)
+		}
+		if idx := strings.Index(stripped, "/"); idx >= 0 {
+			remaining := stripped[idx:]
+			if remaining != "" && remaining != "/" {
+				return fmt.Errorf("group %q: sources.primary.url must be a forge base URL (e.g., https://github.com), not a full repo URL — got %q", g.ID, u)
+			}
+		}
+	}
+	return nil
+}
+
+// ResolvedRepo is a repo with its forge context resolved.
+type ResolvedRepo struct {
+	ID       string // "org/repo" project identifier on the resolved forge
+	ForgeURL string // forge base URL from group, or "" (inherit from governance sources.primary)
+}
+
+// TargetGroup is a cohort of repos on the same forge.
+type TargetGroup struct {
+	ID      string             `yaml:"id,omitempty"`
+	Sources *TargetGroupSource `yaml:"sources,omitempty"` // nil = inherit governance sources.primary
+	Repos   []string           `yaml:"repos"`             // project IDs on this forge
+}
+
+// TargetGroupSource declares forge identity using standard sources schema.
+type TargetGroupSource struct {
+	Primary TargetGroupPrimary `yaml:"primary"`
+}
+
+// TargetGroupPrimary holds the forge base URL for a target group.
+type TargetGroupPrimary struct {
+	URL string `yaml:"url"` // forge base URL (e.g., "https://github.com")
 }
 
 // PresetRef is a reference to an external preset fragment.

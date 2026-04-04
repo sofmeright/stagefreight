@@ -3,8 +3,11 @@ package governance
 import (
 	"bytes"
 	"fmt"
+	"os"
 	"path"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
 // PlanDistribution computes what files need to change for each governed repo.
@@ -35,23 +38,23 @@ func PlanDistribution(
 	var plans []DistributionPlan
 
 	for _, cluster := range gov.Clusters {
-		// DO NOT resolve presets. Pass preset: references through as-is.
-		// Presets are addresses of truth, not values to inject.
-		// Add preset_source so satellites know where to resolve at runtime.
-		config := addPresetSource(deepCopyMap(cluster.Config), presetSource)
+		if err := cluster.Targets.ValidateTargets(); err != nil {
+			return nil, fmt.Errorf("cluster %q: %w", cluster.ID, err)
+		}
 
-		// Render sealed .stagefreight.yml preserving preset references.
-		// Assets declared in the cluster config pass through as-is — they are the
-		// ongoing authority reference for the satellite to re-sync from source.
+		// Resolve vars preset if present — vars are resolved at governance time,
+		// not passed through as references. This produces concrete org-level vars.
+		baseConfig := deepCopyMap(cluster.Config)
+		resolveVarsPreset(baseConfig, presetLoader)
+
+		// Add preset_source so satellites know where to resolve section presets at runtime.
+		// Section presets (targets, badges, etc.) pass through as-is — addresses of truth.
+		baseConfig = addPresetSource(baseConfig, presetSource)
+
 		seal := SealMeta{
 			SourceRepo: sourceIdentity,
 			SourceRef:  presetSource.Ref,
 			ClusterID:  cluster.ID,
-		}
-
-		sealedContent, err := RenderSealedConfig(seal, config)
-		if err != nil {
-			return nil, fmt.Errorf("cluster %q: rendering sealed config: %w", cluster.ID, err)
 		}
 
 		// Collect preset files referenced in the cluster config for cache distribution.
@@ -69,10 +72,23 @@ func PlanDistribution(
 			presetFiles[cachePath] = data
 		}
 
-		for _, repo := range cluster.Targets.Repos {
+		// Per-repo: merge satellite-owned vars, render sealed config, plan files.
+		// Sealed content is per-repo because each satellite may have different local vars.
+		for _, resolved := range cluster.Targets.AllRepos() {
+			repo := resolved.ID
 			plan := DistributionPlan{Repo: repo}
 
-			// Sealed .stagefreight.yml — preset references preserved, not expanded.
+			// Merge satellite-owned vars into governance vars.
+			// Governance keys are authoritative. Undeclared satellite keys are preserved.
+			repoConfig := deepCopyMap(baseConfig)
+			mergeSatelliteVars(repoConfig, forgeReader, repo)
+
+			sealedContent, err := RenderSealedConfig(seal, repoConfig)
+			if err != nil {
+				return nil, fmt.Errorf("cluster %q repo %q: rendering sealed config: %w", cluster.ID, repo, err)
+			}
+
+			// Sealed .stagefreight.yml — section presets preserved, vars resolved.
 			plan.Files = append(plan.Files, planFile(
 				forgeReader, repo,
 				".stagefreight.yml",
@@ -89,8 +105,6 @@ func PlanDistribution(
 			}
 
 			// Resolve declared assets from the cluster's stagefreight config.
-			// Assets are fetched from their declared sources and materialized immediately.
-			// The same asset declarations remain in the sealed config for ongoing sync.
 			if assetFetcher != nil {
 				if assetList, ok := cluster.Config["assets"].([]any); ok {
 					for _, raw := range assetList {
@@ -186,6 +200,93 @@ func addPresetSource(config map[string]any, ps PresetSourceInfo) map[string]any 
 		"cache_policy": ps.CachePolicy,
 	}
 	return out
+}
+
+// resolveVarsPreset resolves a vars preset reference into concrete values.
+// If config["vars"] is a map with a "preset" key, loads the preset file,
+// parses its vars section, and replaces the reference with concrete values.
+// Vars presets are resolved at governance time — they are not passed through.
+func resolveVarsPreset(config map[string]any, loader PresetLoader) {
+	varsRaw, ok := config["vars"]
+	if !ok {
+		return
+	}
+	varsMap, ok := varsRaw.(map[string]any)
+	if !ok {
+		return
+	}
+	presetPath, ok := varsMap["preset"].(string)
+	if !ok || presetPath == "" {
+		return
+	}
+
+	data, err := loader.Load(presetPath)
+	if err != nil {
+		return // preset not found — leave vars as-is
+	}
+
+	var parsed struct {
+		Vars map[string]any `yaml:"vars"`
+	}
+	if yaml.Unmarshal(data, &parsed) != nil || parsed.Vars == nil {
+		return
+	}
+
+	// Replace the preset reference with resolved concrete values.
+	config["vars"] = parsed.Vars
+}
+
+// mergeSatelliteVars reads the satellite repo's existing .stagefreight.yml,
+// extracts its vars, and merges satellite-owned keys into the governance config.
+// Governance keys are authoritative (already in config). Satellite keys that
+// governance does not declare are preserved. This implements the var ownership contract:
+//   - governance-declared keys → governance-owned
+//   - undeclared keys → satellite-owned, preserved
+func mergeSatelliteVars(config map[string]any, reader ForgeReader, repo string) {
+	if reader == nil {
+		return
+	}
+
+	existing, err := reader.GetFileContent(repo, ".stagefreight.yml", "HEAD")
+	if err != nil {
+		return // no existing config — nothing to merge
+	}
+
+	var parsed struct {
+		Vars map[string]any `yaml:"vars"`
+	}
+	if err := yaml.Unmarshal(existing, &parsed); err != nil {
+		fmt.Fprintf(os.Stderr, "  warn: %s: failed to parse existing config for vars merge: %v\n", repo, err)
+		return
+	}
+	if parsed.Vars == nil {
+		return
+	}
+
+	// Get or create the governance vars map.
+	govVars, _ := config["vars"].(map[string]any)
+	if govVars == nil {
+		govVars = make(map[string]any)
+	}
+
+	// Merge with ownership contract enforcement:
+	// - governance-declared keys are authoritative
+	// - undeclared satellite keys are preserved
+	// - ownership takeover (governance now declares a key the satellite had) is logged
+	for k, satelliteVal := range parsed.Vars {
+		govVal, governed := govVars[k]
+		if !governed {
+			// Satellite-owned key — preserve.
+			govVars[k] = satelliteVal
+		} else if fmt.Sprintf("%v", govVal) != fmt.Sprintf("%v", satelliteVal) {
+			// Ownership takeover — governance now declares a key that existed locally
+			// with a different value. Governance wins, but log the takeover.
+			fmt.Fprintf(os.Stderr, "  drift: %s: var %q governance=%v satellite=%v (governance wins)\n",
+				repo, k, govVal, satelliteVal)
+		}
+	}
+
+	config["vars"] = govVars
 }
 
 // collectPresetPaths recursively walks a config and returns all unique preset: reference paths.
