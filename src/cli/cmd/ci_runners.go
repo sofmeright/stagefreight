@@ -1193,7 +1193,7 @@ func validateRunner(_ context.Context, appCfg *config.Config, ciCtx *ci.CIContex
 }
 
 // ── reconcile runner ────────────────────────────────────────────────────────
-func reconcileRunner(_ context.Context, appCfg *config.Config, ciCtx *ci.CIContext, _ ci.RunOptions) error {
+func reconcileRunner(ctx context.Context, appCfg *config.Config, ciCtx *ci.CIContext, opts ci.RunOptions) error {
 	start := time.Now()
 
 	hasGitOps := strings.TrimSpace(appCfg.GitOps.Cluster.Name) != ""
@@ -1224,8 +1224,12 @@ func reconcileRunner(_ context.Context, appCfg *config.Config, ciCtx *ci.CIConte
 			renderCISkip("Reconcile", start, "governance source not configured")
 		} else {
 			// CI implies --apply: the reconcile stage exists to apply.
-			govApply = true
-			if err := runGovernanceReconcile(&cobra.Command{}, []string{}); err != nil {
+			if err := executeGovernanceReconcile(ctx, GovernanceReconcileOpts{
+				Apply:   true,
+				Config:  appCfg,
+				CICtx:   ciCtx,
+				Verbose: opts.Verbose,
+			}); err != nil {
 				return err
 			}
 		}

@@ -31,7 +31,17 @@ Forge identity (provider, URL, credentials) is read from sources.primary
 in .stagefreight.yml — the same config every StageFreight repo uses.
 
 Use --dry-run to preview changes without committing.`,
-	RunE: runGovernanceReconcile,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return executeGovernanceReconcile(cmd.Context(), GovernanceReconcileOpts{
+			DryRun:  govDryRun,
+			Apply:   govApply,
+			Source:  govSource,
+			Ref:     govRef,
+			Path:    govPath,
+			Config:  cfg,
+			Verbose: verbose,
+		})
+	},
 }
 
 func init() {
@@ -43,9 +53,32 @@ func init() {
 	governanceCmd.AddCommand(governanceReconcileCmd)
 }
 
-func runGovernanceReconcile(cmd *cobra.Command, args []string) error {
-	// Resolve governance source — CLI flags override config.
-	source, err := resolveGovernanceSource()
+// GovernanceReconcileOpts carries all inputs for governance reconciliation.
+// No package globals, no cobra dependency — all execution state is explicit.
+type GovernanceReconcileOpts struct {
+	DryRun  bool
+	Apply   bool
+	Source  string // override governance source repo URL
+	Ref     string // override governance source ref
+	Path    string // override governance clusters file path
+	Config  *config.Config
+	CICtx   *ci.CIContext // nil = not in CI (source resolution skips CI layer)
+	Verbose bool
+}
+
+// executeGovernanceReconcile is the core reconcile logic.
+// Takes an explicit context and opts — no cobra dependency, no package globals.
+func executeGovernanceReconcile(ctx context.Context, opts GovernanceReconcileOpts) error {
+	// Mode validation — exactly one must be set.
+	if opts.DryRun && opts.Apply {
+		return fmt.Errorf("invalid options: dry-run and apply are mutually exclusive")
+	}
+	if !opts.DryRun && !opts.Apply {
+		return fmt.Errorf("must specify either --apply or --dry-run")
+	}
+
+	// Resolve governance source.
+	source, err := resolveGovernanceSourceFromOpts(opts)
 	if err != nil {
 		return err
 	}
@@ -69,15 +102,15 @@ func runGovernanceReconcile(cmd *cobra.Command, args []string) error {
 	}
 
 	// Phase 2: Plan distribution.
-	// Assets (skeleton, settings, etc.) are declared in each cluster's stagefreight.assets
-	// and resolved by the distributor via AssetFetcher. No separate skeleton/aux code paths.
 	fmt.Fprintf(os.Stderr, "\nPlanning distribution for %d repos...\n", totalRepos)
 
-	sourceIdentity := extractIdentity(source.RepoURL)
+	_, _, sourceIdentity, parseErr := config.ParseForgeURL(source.RepoURL)
+	if parseErr != nil {
+		return fmt.Errorf("parsing governance source URL: %w", parseErr)
+	}
 
 	// Resolve forge from sources.primary — standard StageFreight config resolution.
-	// No governance-specific forge flags. Same machinery every repo uses.
-	forgeProvider, forgeBaseURL, forgeCreds, err := resolveGovernanceForge()
+	forgeProvider, forgeBaseURL, forgeCreds, err := resolveGovernanceForgeFromConfig(opts.Config)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Forge: %v (drift detection disabled)\n", err)
 	}
@@ -90,11 +123,7 @@ func runGovernanceReconcile(cmd *cobra.Command, args []string) error {
 			BaseURL:      forgeBaseURL,
 			CredPrefix:   forgeCreds,
 		}
-		adapterCtx := cmd.Context()
-		if adapterCtx == nil {
-			adapterCtx = context.Background()
-		}
-		adapter = &forgeAdapter{factory: factory, ctx: adapterCtx}
+		adapter = &forgeAdapter{factory: factory, ctx: ctx}
 		forgeReader = adapter
 		fmt.Fprintf(os.Stderr, "Forge: %s @ %s (cred: %s_*)\n", forgeProvider, forgeBaseURL, forgeCreds)
 	}
@@ -122,13 +151,13 @@ func runGovernanceReconcile(cmd *cobra.Command, args []string) error {
 		planByRepo[p.Repo] = p
 	}
 
-	if govDryRun {
+	if opts.DryRun {
 		governance.RenderPlanView(os.Stdout, governance.PlanViewData{
 			Config: governance.PlanViewConfig{
 				Mode:    "dry-run",
 				Source:  sourceIdentity,
 				Ref:     source.Ref,
-				Verbose: verbose,
+				Verbose: opts.Verbose,
 			},
 			Clusters: gov.Clusters,
 			Plans:    planByRepo,
@@ -136,12 +165,7 @@ func runGovernanceReconcile(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Phase 6: Commit to satellite repos.
-	if !govApply {
-		fmt.Fprintln(os.Stderr, "\nUse --apply to commit changes, or --dry-run to preview")
-		return nil
-	}
-
+	// Phase 6: Commit to satellite repos (Apply mode — validated at entry).
 	if adapter == nil {
 		return fmt.Errorf("sources.primary required for --apply mode (forge identity not resolved)")
 	}
@@ -162,7 +186,7 @@ func runGovernanceReconcile(cmd *cobra.Command, args []string) error {
 			Mode:    "apply",
 			Source:  sourceIdentity,
 			Ref:     source.Ref,
-			Verbose: verbose,
+			Verbose: opts.Verbose,
 		},
 		Clusters: gov.Clusters,
 		Plans:    planByRepo,
@@ -172,53 +196,43 @@ func runGovernanceReconcile(cmd *cobra.Command, args []string) error {
 	return err
 }
 
-// resolveGovernanceSource determines the governance source from CLI flags, CI context, or config.
-// When running in CI inside a governance repo, auto-resolves from the CI environment:
-//   - RepoURL from SF_CI_REPO_URL
-//   - Ref from SF_CI_SHA (pinned to exact commit)
-//   - LocalPath from SF_CI_WORKSPACE (avoids redundant clone)
-func resolveGovernanceSource() (governance.GovernanceSource, error) {
+// resolveGovernanceSourceFromOpts determines the governance source via three
+// explicit resolution layers, applied in priority order:
+//  1. Explicit overrides (CLI flags or caller-provided opts)
+//  2. CI context inference (when running in a governance repo in CI)
+//  3. Config fallback (sources.primary.url)
+func resolveGovernanceSourceFromOpts(opts GovernanceReconcileOpts) (governance.GovernanceSource, error) {
 	source := governance.GovernanceSource{}
 
-	// CLI flags take priority.
-	if govSource != "" {
-		source.RepoURL = govSource
-	}
-	if govRef != "" {
-		source.Ref = govRef
-	}
-	if govPath != "" {
-		source.Path = govPath
-	}
+	// Layer 1: Explicit overrides — highest priority.
+	source.RepoURL = opts.Source
+	source.Ref = opts.Ref
+	source.Path = opts.Path
 
-	// CI context fallback: when lifecycle.mode == governance and running in CI,
-	// the governance repo is the current repo at the current commit.
-	if cfg != nil && cfg.Lifecycle.Mode == "governance" {
-		ciCtx := ci.ResolveContext()
-		if ciCtx.IsCI() {
-			if source.RepoURL == "" {
-				source.RepoURL = ciCtx.RepoURL
-			}
-			if source.Ref == "" {
-				source.Ref = ciCtx.SHA
-			}
-			// Use local checkout — repo is already checked out at this SHA.
-			if ciCtx.Workspace != "" {
-				source.LocalPath = ciCtx.Workspace
-			}
+	// Layer 2: CI context — infer from caller-provided CI state.
+	if opts.CICtx != nil && opts.CICtx.IsCI() && opts.Config != nil && opts.Config.Lifecycle.Mode == "governance" {
+		if source.RepoURL == "" {
+			source.RepoURL = opts.CICtx.RepoURL
+		}
+		if source.Ref == "" {
+			source.Ref = opts.CICtx.SHA
+		}
+		if opts.CICtx.Workspace != "" {
+			source.LocalPath = opts.CICtx.Workspace
 		}
 	}
 
-	// Fall back to sources.primary.url from config.
-	if source.RepoURL == "" && cfg != nil && cfg.Sources.Primary.URL != "" {
-		source.RepoURL = cfg.Sources.Primary.URL
+	// Layer 3: Config fallback — sources.primary.url from .stagefreight.yml.
+	if source.RepoURL == "" && opts.Config != nil && opts.Config.Sources.Primary.URL != "" {
+		source.RepoURL = opts.Config.Sources.Primary.URL
 	}
 
-	// Default path: governance is embedded in .stagefreight.yml.
+	// Default path.
 	if source.Path == "" {
 		source.Path = ".stagefreight.yml"
 	}
 
+	// Validate — both are required after all layers applied.
 	if source.RepoURL == "" {
 		return source, fmt.Errorf("governance source required: set sources.primary.url in .stagefreight.yml")
 	}
@@ -229,44 +243,22 @@ func resolveGovernanceSource() (governance.GovernanceSource, error) {
 	return source, nil
 }
 
-// resolveGovernanceForge reads forge identity from the standard sources.primary config.
-// Returns provider, base URL, and credential prefix.
-// This is the same config resolution every StageFreight repo uses — no governance-specific mechanism.
-func resolveGovernanceForge() (provider, baseURL, credPrefix string, err error) {
-	if cfg == nil || cfg.Sources.Primary.URL == "" {
+// resolveGovernanceForgeFromConfig reads forge identity from the standard sources.primary config.
+func resolveGovernanceForgeFromConfig(appCfg *config.Config) (provider, baseURL, credPrefix string, err error) {
+	if appCfg == nil || appCfg.Sources.Primary.URL == "" {
 		return "", "", "", fmt.Errorf("sources.primary.url not configured")
 	}
 
-	provider, baseURL, _, err = config.ParseForgeURL(cfg.Sources.Primary.URL)
+	provider, baseURL, _, err = config.ParseForgeURL(appCfg.Sources.Primary.URL)
 	if err != nil {
 		return "", "", "", fmt.Errorf("parsing sources.primary.url: %w", err)
 	}
 
-	// Credential prefix: use the first mirror's credentials if declared,
-	// otherwise derive from provider name (GITLAB, GITHUB, GITEA).
 	credPrefix = strings.ToUpper(provider)
-
 	return provider, baseURL, credPrefix, nil
 }
 
-// extractIdentity extracts "org/repo" from a full URL.
-func extractIdentity(repoURL string) string {
-	// Strip protocol.
-	s := repoURL
-	for _, prefix := range []string{"https://", "http://", "ssh://", "git@"} {
-		s = strings.TrimPrefix(s, prefix)
-	}
-	// Strip host.
-	if idx := strings.Index(s, "/"); idx >= 0 {
-		s = s[idx+1:]
-	}
-	// Strip .git suffix.
-	s = strings.TrimSuffix(s, ".git")
-	return s
-}
-
 // forgeAdapter wraps forge.Factory to satisfy both governance.ForgeReader and governance.ForgeClient.
-// Governance selects repos; the factory materializes per-repo forge clients.
 type forgeAdapter struct {
 	factory forge.Factory
 	ctx     context.Context
@@ -294,7 +286,6 @@ func (a *forgeAdapter) CommitFiles(repo, branch, message string, files []governa
 		return "", fmt.Errorf("creating forge for %s: %w", repo, err)
 	}
 
-	// Convert governance FileCommit to forge FileAction.
 	forgeFiles := make([]forge.FileAction, 0, len(files))
 	for _, fc := range files {
 		forgeFiles = append(forgeFiles, forge.FileAction{
