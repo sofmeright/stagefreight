@@ -20,15 +20,13 @@ type PresetSourceInfo struct {
 	CachePolicy string // "authoritative" or "advisory"
 }
 
-// SkeletonResolver fetches skeleton content for a cluster.
-// Uses per-cluster skeleton source if set, falls back to global.
-type SkeletonResolver func(cluster Cluster) ([]byte, error)
+// AssetFetcher fetches a file from a repo at a specific ref.
+type AssetFetcher func(repoURL, ref, path string) ([]byte, error)
 
 func PlanDistribution(
 	gov *GovernanceConfig,
 	presetLoader PresetLoader,
-	skeletonResolver SkeletonResolver,
-	auxFiles map[string][]byte,
+	assetFetcher AssetFetcher,
 	forgeReader ForgeReader,
 	presetSource PresetSourceInfo,
 	sourceIdentity string, // for seal header display
@@ -43,6 +41,8 @@ func PlanDistribution(
 		config := addPresetSource(deepCopyMap(cluster.Config), presetSource)
 
 		// Render sealed .stagefreight.yml preserving preset references.
+		// Assets declared in the cluster config pass through as-is — they are the
+		// ongoing authority reference for the satellite to re-sync from source.
 		seal := SealMeta{
 			SourceRepo: sourceIdentity,
 			SourceRef:  presetSource.Ref,
@@ -88,28 +88,42 @@ func PlanDistribution(
 				))
 			}
 
-			// CI skeleton — per-cluster variant via resolver.
-			if skeletonResolver != nil {
-				skeletonBytes, err := skeletonResolver(cluster)
-				if err != nil {
-					return nil, fmt.Errorf("cluster %q: resolving skeleton: %w", cluster.ID, err)
+			// Resolve declared assets from the cluster's stagefreight config.
+			// Assets are fetched from their declared sources and materialized immediately.
+			// The same asset declarations remain in the sealed config for ongoing sync.
+			if assetFetcher != nil {
+				if assetList, ok := cluster.Config["assets"].([]any); ok {
+					for _, raw := range assetList {
+						asset, ok := raw.(map[string]any)
+						if !ok {
+							continue
+						}
+						target, _ := asset["target"].(string)
+						source, _ := asset["source"].(map[string]any)
+						if target == "" || source == nil {
+							continue
+						}
+						repoURL, _ := source["repo_url"].(string)
+						ref, _ := source["ref"].(string)
+						srcPath, _ := source["path"].(string)
+						if repoURL == "" || srcPath == "" {
+							continue
+						}
+						if ref == "" {
+							ref = "main"
+						}
+						content, err := assetFetcher(repoURL, ref, srcPath)
+						if err != nil {
+							return nil, fmt.Errorf("cluster %q: fetching asset %q from %s@%s:%s: %w",
+								cluster.ID, target, repoURL, ref, srcPath, err)
+						}
+						plan.Files = append(plan.Files, planFile(
+							forgeReader, repo,
+							target,
+							content,
+						))
+					}
 				}
-				if len(skeletonBytes) > 0 {
-					plan.Files = append(plan.Files, planFile(
-						forgeReader, repo,
-						".gitlab-ci.yml",
-						skeletonBytes,
-					))
-				}
-			}
-
-			// Auxiliary files (claude-code settings, precommit, etc.).
-			for path, content := range auxFiles {
-				plan.Files = append(plan.Files, planFile(
-					forgeReader, repo,
-					path,
-					content,
-				))
 			}
 
 			plans = append(plans, plan)

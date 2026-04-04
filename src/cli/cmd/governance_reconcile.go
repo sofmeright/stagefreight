@@ -68,52 +68,9 @@ func runGovernanceReconcile(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stderr, "  cluster %q: %d repos\n", c.ID, len(c.Targets.Repos))
 	}
 
-	// Phase 2: Build skeleton resolver (per-cluster with global fallback).
-	globalSkel := gov.Skeleton.Source
-	skeletonCache := map[string][]byte{} // cache by "repoURL@ref:path"
-
-	skeletonResolver := func(cluster governance.Cluster) ([]byte, error) {
-		// Per-cluster override: merge with global (cluster overrides non-empty fields).
-		ref := governance.SkeletonRef{
-			RepoURL: globalSkel.RepoURL,
-			Ref:     globalSkel.Ref,
-			Path:    globalSkel.Path,
-		}
-		if cluster.Skeleton.Source.Path != "" {
-			ref.Path = cluster.Skeleton.Source.Path
-		}
-		if cluster.Skeleton.Source.RepoURL != "" {
-			ref.RepoURL = cluster.Skeleton.Source.RepoURL
-		}
-		if cluster.Skeleton.Source.Ref != "" {
-			ref.Ref = cluster.Skeleton.Source.Ref
-		}
-
-		if ref.RepoURL == "" || ref.Path == "" {
-			return nil, nil // no skeleton configured
-		}
-
-		cacheKey := ref.RepoURL + "@" + ref.Ref + ":" + ref.Path
-		if cached, ok := skeletonCache[cacheKey]; ok {
-			return cached, nil
-		}
-
-		fmt.Fprintf(os.Stderr, "  skeleton: %s @ %s path=%s (cluster %s)\n",
-			ref.RepoURL, ref.Ref, ref.Path, cluster.ID)
-
-		data, err := governance.FetchFile(ref.RepoURL, ref.Ref, ref.Path)
-		if err != nil {
-			return nil, fmt.Errorf("fetching skeleton: %w", err)
-		}
-
-		skeletonCache[cacheKey] = data
-		return data, nil
-	}
-
-	// Phase 3: Load auxiliary files (claude-code settings, etc.).
-	auxFiles := loadAuxFiles(presetLoader)
-
-	// Phase 4: Plan distribution.
+	// Phase 2: Plan distribution.
+	// Assets (skeleton, settings, etc.) are declared in each cluster's stagefreight.assets
+	// and resolved by the distributor via AssetFetcher. No separate skeleton/aux code paths.
 	fmt.Fprintf(os.Stderr, "\nPlanning distribution for %d repos...\n", totalRepos)
 
 	sourceIdentity := extractIdentity(source.RepoURL)
@@ -144,7 +101,7 @@ func runGovernanceReconcile(cmd *cobra.Command, args []string) error {
 	}
 
 	plans, err := governance.PlanDistribution(
-		gov, presetLoader, skeletonResolver, auxFiles,
+		gov, presetLoader, governance.FetchFile,
 		forgeReader,
 		presetSource, sourceIdentity,
 	)
@@ -242,20 +199,6 @@ func resolveGovernanceSource() (governance.GovernanceSource, error) {
 	}
 
 	return source, nil
-}
-
-// loadAuxFiles loads auxiliary files from the policy repo for distribution.
-func loadAuxFiles(loader governance.PresetLoader) map[string][]byte {
-	files := make(map[string][]byte)
-
-	// Claude Code project settings.
-	if data, err := loader.Load("claude-code/project-settings.json"); err == nil {
-		files[".claude/settings.json"] = data
-	}
-
-	// Future: precommit, renovate, etc.
-
-	return files
 }
 
 // extractIdentity extracts "org/repo" from a full URL.
