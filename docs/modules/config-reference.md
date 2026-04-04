@@ -513,7 +513,9 @@ commit:
 | Name | YAML Key | Type | Required | Default | Description |
 |------|----------|------|----------|---------|-------------|
 | `id` | `clusters.id` | string | Yes | — | string value |
-| `repos` | `clusters.targets.repos` | []string | Yes | — | []string value |
+| `repos` | `clusters.targets.repos` | []string | No | — | []string value |
+| `id` | `clusters.targets.groups.id` | string | No | — | string value |
+| `repos` | `clusters.targets.groups.repos` | []string | Yes | — | []string value |
 | `stagefreight` | `clusters.stagefreight` | map[string]any | Yes | — | map[string]any value |
 
 ---
