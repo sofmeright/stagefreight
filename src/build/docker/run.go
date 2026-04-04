@@ -61,6 +61,7 @@ func Run(req Request) error {
 			detectPhase(req),
 			planPhase(req),
 			pipeline.DryRunGate(renderPlan),
+			cleanupPhase(),
 			executePhase(req),
 			publishPhase(),
 		},

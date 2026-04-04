@@ -70,6 +70,9 @@ type ExternalRetention struct {
 // HostCleanupConfig defines host hygiene — classification-first pruning.
 // Not cache — residue cleanup. Object classes match DD-UI's operation types.
 type HostCleanupConfig struct {
+	// Enabled controls whether cleanup runs. Independent of cache mode.
+	Enabled bool `yaml:"enabled,omitempty"`
+
 	// Enforcement controls what happens when cleanup cannot execute.
 	// best_effort: continue + structured warning.
 	// required: fail build immediately.
@@ -154,6 +157,7 @@ func DefaultBuildCacheConfig() BuildCacheConfig {
 			},
 		},
 		Cleanup: HostCleanupConfig{
+			Enabled:     false, // never touches host unless explicitly enabled
 			Enforcement: "best_effort",
 			Protect: ProtectionPolicy{
 				Volumes: VolumeProtection{
