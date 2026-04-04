@@ -99,6 +99,32 @@ type PublishManifest struct {
 
 const PublishManifestPath = ".stagefreight/publish.json"
 
+// ParseImageRef parses a full image reference string into a PublishedImage.
+// e.g., "docker.io/prplanit/stagefreight:dev-992c122" → Host, Path, Tag, Ref.
+func ParseImageRef(ref string) PublishedImage {
+	img := PublishedImage{Ref: ref}
+
+	// Split tag.
+	tagIdx := strings.LastIndex(ref, ":")
+	if tagIdx > 0 && !strings.Contains(ref[tagIdx:], "/") {
+		img.Tag = ref[tagIdx+1:]
+		ref = ref[:tagIdx]
+	}
+
+	// Split host from path. First segment with a dot or colon is the host.
+	parts := strings.SplitN(ref, "/", 2)
+	if len(parts) == 2 && (strings.Contains(parts[0], ".") || strings.Contains(parts[0], ":")) {
+		img.Host = normalizeHost(parts[0])
+		img.Path = parts[1]
+	} else {
+		// Docker Hub shorthand (no explicit host).
+		img.Host = "docker.io"
+		img.Path = ref
+	}
+
+	return img
+}
+
 // normalizeHost strips scheme prefixes and trailing slashes from a registry host.
 func normalizeHost(h string) string {
 	h = strings.TrimPrefix(h, "https://")

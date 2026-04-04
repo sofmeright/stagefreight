@@ -335,6 +335,22 @@ func runCrucibleMode(req Request) error {
 			if publishErr == nil {
 				publishPassed = true
 				publishResult = pubResult
+
+				// Write publish manifest from ACTUAL publish results, not the plan.
+				// StepResult.Images contains refs that were actually pushed by buildx.
+				var manifest artifact.PublishManifest
+				for _, step := range pubResult.Steps {
+					for _, ref := range step.Images {
+						img := artifact.ParseImageRef(ref)
+						manifest.Published = append(manifest.Published, img)
+					}
+				}
+
+				// Manifest write failure = publish failure. Downstream depends on this file.
+				if err := artifact.WritePublishManifest(rootDir, manifest); err != nil {
+					publishPassed = false
+					publishErr = fmt.Errorf("write publish manifest: %w", err)
+				}
 			}
 		}
 	}
