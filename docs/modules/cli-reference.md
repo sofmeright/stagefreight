@@ -1044,6 +1044,9 @@ Commands for reconciling governance policy across governed repositories.
 Reads governance clusters from the policy repo, resolves presets,
 generates managed configs, and commits to satellite repos.
 
+Forge identity (provider, URL, credentials) is read from sources.primary
+in .stagefreight.yml — the same config every StageFreight repo uses.
+
 Use --dry-run to preview changes without committing.
 
 **Flags:**
@@ -1051,11 +1054,8 @@ Use --dry-run to preview changes without committing.
 | Name | Type | Default | Description |
 |------|------|---------|-------------|
 | `--apply` | bool | — | Actually commit changes (required for real writes) |
-| `--cred-prefix` | string | `GITLAB` | Credential env var prefix for forge API |
 | `--dry-run` | bool | — | Preview changes without committing |
-| `--forge-url` | string | — | Forge base URL for target repos (e.g., https://gitlab.prplanit.com) |
 | `--path` | string | — | Override governance clusters file path |
-| `--provider` | string | `gitlab` | Forge provider for target repos (gitlab, github, gitea) |
 | `--ref` | string | — | Override governance source ref |
 | `--source` | string | — | Override governance source repo URL |
 
