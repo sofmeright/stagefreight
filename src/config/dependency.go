@@ -55,6 +55,7 @@ type DependencyCommitConfig struct {
 	SkipCI    bool                      `yaml:"skip_ci"`
 	Promotion DependencyCommitPromotion `yaml:"promotion"` // "direct" or "mr"
 	MR        DependencyMRConfig        `yaml:"mr"`
+	RunFrom   RunFromConfig              `yaml:"run_from,omitempty"` // gate mutation to declared origin
 }
 
 // DefaultDependencyConfig returns sensible defaults for dependency management.

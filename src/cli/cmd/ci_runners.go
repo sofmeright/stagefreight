@@ -268,8 +268,12 @@ func depsRunner(ctx context.Context, appCfg *config.Config, ciCtx *ci.CIContext,
 	updateSec.Row("%-16s%d", "files changed", len(result.FilesChanged))
 	updateSec.Close()
 
-	// Auto-commit if configured and files changed
+	// Auto-commit if configured and files changed — gated by run_from.
 	if appCfg.Dependency.Commit.Enabled && len(result.FilesChanged) > 0 {
+		if rfResult := config.EvaluateRunFrom(appCfg.Dependency.Commit.RunFrom, ciCtx.RepoURL, appCfg.Sources.Primary.URL); !rfResult.Matched && rfResult.Mode != "ignore" {
+			fmt.Fprintf(os.Stderr, "  deps commit: %s (%s)\n", rfResult.Mode, rfResult.Reason)
+			return nil
+		}
 		// Compute bot branch for MR promotion mode
 		var botBranch string
 		if appCfg.Dependency.Commit.Promotion == config.PromotionMR && !ciCtx.IsCI() {
@@ -602,17 +606,25 @@ func docsRunner(ctx context.Context, appCfg *config.Config, ciCtx *ci.CIContext,
 		}
 	}
 
-	// Auto-commit if configured
+	// Auto-commit if configured — gated by run_from.
 	if appCfg.Docs.Commit.Enabled {
-		if _, err := autoCommitViaPlanner(ctx, appCfg, rootDir, commit.PlannerOptions{
-			Type:    appCfg.Docs.Commit.Type,
-			Message: appCfg.Docs.Commit.Message,
-			Body:    "Narrator: StageFreight\nCue: docs/narrator",
-			Paths:   appCfg.Docs.Commit.Add,
-			SkipCI:  boolPtr(appCfg.Docs.Commit.SkipCI),
-			Push:    boolPtr(appCfg.Docs.Commit.Push),
-		}); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: docs auto-commit failed: %v\n", err)
+		rfResult := config.EvaluateRunFrom(appCfg.Docs.Commit.RunFrom, ciCtx.RepoURL, appCfg.Sources.Primary.URL)
+		switch {
+		case !rfResult.Matched && rfResult.Mode == "exit":
+			fmt.Fprintf(os.Stderr, "  docs commit: blocked (%s)\n", rfResult.Reason)
+		case !rfResult.Matched && rfResult.Mode == "read-only":
+			fmt.Fprintf(os.Stderr, "  docs commit: read-only (%s)\n", rfResult.Reason)
+		default: // matched or ignore
+			if _, err := autoCommitViaPlanner(ctx, appCfg, rootDir, commit.PlannerOptions{
+				Type:    appCfg.Docs.Commit.Type,
+				Message: appCfg.Docs.Commit.Message,
+				Body:    "Narrator: StageFreight\nCue: docs/narrator",
+				Paths:   appCfg.Docs.Commit.Add,
+				SkipCI:  boolPtr(appCfg.Docs.Commit.SkipCI),
+				Push:    boolPtr(appCfg.Docs.Commit.Push),
+			}); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: docs auto-commit failed: %v\n", err)
+			}
 		}
 	}
 
@@ -657,6 +669,21 @@ func hasTrailer(body, key, value string) bool {
 func releaseRunner(ctx context.Context, appCfg *config.Config, ciCtx *ci.CIContext, opts ci.RunOptions) error {
 	relAllowFailure := !appCfg.Release.IsRequired()
 	rootDir := resolveWorkspace(ciCtx)
+
+	// run_from gate — controls mutation authority for release.
+	if rfResult := config.EvaluateRunFrom(appCfg.Release.RunFrom, ciCtx.RepoURL, appCfg.Sources.Primary.URL); !rfResult.Matched && rfResult.Mode != "ignore" {
+		reason := fmt.Sprintf("run_from: %s (%s)", rfResult.Mode, rfResult.Reason)
+		renderReleaseSkip(ciCtx, releaseSkipDisabled, reason)
+		if err := cistate.UpdateState(rootDir, func(st *cistate.State) {
+			st.RecordSubsystem(cistate.SubsystemState{
+				Name: "release", Attempted: true, Skipped: true, AllowFailure: relAllowFailure,
+				Outcome: "skipped", Reason: reason,
+			})
+		}); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: pipeline state write failed: %v\n", err)
+		}
+		return nil
+	}
 
 	if !appCfg.Release.Enabled {
 		renderReleaseSkip(ciCtx, releaseSkipDisabled, "release disabled in config")

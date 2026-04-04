@@ -23,6 +23,7 @@ type DocsCommitConfig struct {
 	Add     []string `yaml:"add"`
 	Push    bool     `yaml:"push"`
 	SkipCI  bool     `yaml:"skip_ci"`
+	RunFrom RunFromConfig `yaml:"run_from,omitempty"` // gate mutation to declared origin
 }
 
 // DefaultDocsConfig returns sensible defaults for docs generation.

@@ -24,6 +24,11 @@ type TargetConfig struct {
 	// When specifies routing conditions for this target.
 	When TargetCondition `yaml:"when,omitempty"`
 
+	// RunFrom gates mutation to declared execution origins.
+	// e.g. ["primary"] — only mutate when running from sources.primary.
+	// Empty = no restriction (backward compat).
+	RunFrom RunFromConfig `yaml:"run_from,omitempty"`
+
 	// SelectTags enables CLI filtering via --select.
 	SelectTags []string `yaml:"select_tags,omitempty"`
 
