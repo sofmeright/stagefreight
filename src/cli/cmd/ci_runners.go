@@ -1297,7 +1297,7 @@ func reconcileRunner(ctx context.Context, appCfg *config.Config, ciCtx *ci.CICon
 
 	hasGitOps := strings.TrimSpace(appCfg.GitOps.Cluster.Name) != ""
 	hasGovernanceClusters := len(appCfg.Governance.Clusters) > 0
-	hasGovernanceSource := governanceSourceConfigured(appCfg)
+	hasGovernanceSource := governanceSourceConfigured(appCfg, ciCtx)
 
 	if !hasGitOps && !hasGovernanceClusters {
 		renderCISkip("Reconcile", start, "no reconcile target configured")
@@ -1350,8 +1350,8 @@ func renderCISkip(section string, start time.Time, reason string) {
 }
 
 // governanceSourceConfigured checks if governance has a resolvable source.
-func governanceSourceConfigured(appCfg *config.Config) bool {
-	src, err := resolveGovernanceSourceFromOpts(GovernanceReconcileOpts{Config: appCfg})
+func governanceSourceConfigured(appCfg *config.Config, ciCtx *ci.CIContext) bool {
+	src, err := resolveGovernanceSourceFromOpts(GovernanceReconcileOpts{Config: appCfg, CICtx: ciCtx})
 	return err == nil && src.RepoURL != ""
 }
 
