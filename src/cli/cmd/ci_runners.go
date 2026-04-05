@@ -1304,14 +1304,12 @@ func reconcileRunner(ctx context.Context, appCfg *config.Config, ciCtx *ci.CICon
 		return nil
 	}
 
-	// GitOps reconcile — requires cluster auth.
+	// GitOps reconcile — auth resolved at runtime (CA cert, OIDC, or kubeconfig).
+	// No pre-flight gate — let the runtime detect available auth and fail
+	// with a clear error if nothing works.
 	if hasGitOps {
-		if strings.TrimSpace(appCfg.GitOps.OIDC.Audience) != "" && strings.TrimSpace(os.Getenv("STAGEFREIGHT_OIDC")) == "" {
-			renderCISkip("Reconcile", start, "cluster auth unavailable")
-		} else {
-			if err := runReconcile(&cobra.Command{}, []string{}); err != nil {
-				return err
-			}
+		if err := runReconcile(&cobra.Command{}, []string{}); err != nil {
+			return err
 		}
 	}
 
