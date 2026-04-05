@@ -1308,7 +1308,9 @@ func reconcileRunner(ctx context.Context, appCfg *config.Config, ciCtx *ci.CICon
 	// No pre-flight gate — let the runtime detect available auth and fail
 	// with a clear error if nothing works.
 	if hasGitOps {
-		if err := runReconcile(&cobra.Command{}, []string{}); err != nil {
+		cmd := &cobra.Command{}
+		cmd.SetContext(ctx)
+		if err := runReconcile(cmd, []string{}); err != nil {
 			return err
 		}
 	}
