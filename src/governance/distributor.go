@@ -76,7 +76,7 @@ func PlanDistribution(
 		// Sealed content is per-repo because each satellite may have different local vars.
 		for _, resolved := range cluster.Targets.AllRepos() {
 			repo := resolved.ID
-			plan := DistributionPlan{Repo: repo}
+			plan := DistributionPlan{Repo: repo, Credentials: cluster.Targets.Credentials}
 
 			// Merge satellite-owned vars into governance vars.
 			// Governance keys are authoritative. Undeclared satellite keys are preserved.

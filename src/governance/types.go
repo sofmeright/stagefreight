@@ -38,8 +38,9 @@ type Cluster struct {
 //   - Flat: targets.repos (string list, inherits governance sources.primary forge)
 //   - Grouped: targets.groups (each group declares its own forge source)
 type ClusterTargets struct {
-	Repos  []string      `yaml:"repos,omitempty"`  // shorthand: flat list, inherited forge
-	Groups []TargetGroup `yaml:"groups,omitempty"` // explicit: per-group forge identity
+	Repos       []string      `yaml:"repos,omitempty"`       // shorthand: flat list, inherited forge
+	Groups      []TargetGroup `yaml:"groups,omitempty"`      // explicit: per-group forge identity
+	Credentials string        `yaml:"credentials,omitempty"` // env var prefix for forge auth (e.g. "GITLAB_HOMELABHD" → GITLAB_HOMELABHD_TOKEN)
 }
 
 // AllRepos flattens both forms into a unified list for iteration.
@@ -172,8 +173,9 @@ type SkippedFeature struct {
 
 // DistributionPlan describes what files to write to a target repo.
 type DistributionPlan struct {
-	Repo  string             // "org/repo"
-	Files []DistributedFile
+	Repo        string             // "org/repo"
+	Credentials string             // env var prefix for forge auth (from cluster targets)
+	Files       []DistributedFile
 }
 
 // DistributedFile is a single file to write/update in a target repo.

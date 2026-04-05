@@ -170,6 +170,15 @@ func executeGovernanceReconcile(ctx context.Context, opts GovernanceReconcileOpt
 		return fmt.Errorf("sources.primary required for --apply mode (forge identity not resolved)")
 	}
 
+	// Populate per-repo credential overrides from cluster targets.
+	credOverrides := make(map[string]string)
+	for _, p := range plans {
+		if p.Credentials != "" {
+			credOverrides[p.Repo] = p.Credentials
+		}
+	}
+	adapter.credOverrides = credOverrides
+
 	fmt.Fprintln(os.Stderr, "\nCommitting to satellite repos...")
 	results, err := governance.CommitDistribution(plans, adapter, sourceIdentity, source.Ref, false)
 	if err != nil {
@@ -259,13 +268,30 @@ func resolveGovernanceForgeFromConfig(appCfg *config.Config) (provider, baseURL,
 }
 
 // forgeAdapter wraps forge.Factory to satisfy both governance.ForgeReader and governance.ForgeClient.
+// Supports per-repo credential overrides via credOverrides map.
 type forgeAdapter struct {
-	factory forge.Factory
-	ctx     context.Context
+	factory       forge.Factory
+	ctx           context.Context
+	credOverrides map[string]string // repo → credential prefix override
+}
+
+// forgeForRepo returns a forge client for the given repo, respecting credential overrides.
+func (a *forgeAdapter) forgeForRepo(repo string) (forge.Forge, error) {
+	if cred, ok := a.credOverrides[repo]; ok && cred != "" {
+		// Use overridden credentials — create factory with different prefix.
+		baseFactory := a.factory.(*forge.BasicFactory)
+		overrideFactory := &forge.BasicFactory{
+			ProviderName: baseFactory.ProviderName,
+			BaseURL:      baseFactory.BaseURL,
+			CredPrefix:   cred,
+		}
+		return overrideFactory.ForRepo(a.ctx, repo)
+	}
+	return a.factory.ForRepo(a.ctx, repo)
 }
 
 func (a *forgeAdapter) GetFileContent(repo, path, ref string) ([]byte, error) {
-	f, err := a.factory.ForRepo(a.ctx, repo)
+	f, err := a.forgeForRepo(repo)
 	if err != nil {
 		return nil, fmt.Errorf("creating forge for %s: %w", repo, err)
 	}
@@ -273,7 +299,7 @@ func (a *forgeAdapter) GetFileContent(repo, path, ref string) ([]byte, error) {
 }
 
 func (a *forgeAdapter) DefaultBranch(repo string) (string, error) {
-	f, err := a.factory.ForRepo(a.ctx, repo)
+	f, err := a.forgeForRepo(repo)
 	if err != nil {
 		return "", fmt.Errorf("creating forge for %s: %w", repo, err)
 	}
@@ -281,7 +307,7 @@ func (a *forgeAdapter) DefaultBranch(repo string) (string, error) {
 }
 
 func (a *forgeAdapter) CommitFiles(repo, branch, message string, files []governance.FileCommit) (string, error) {
-	f, err := a.factory.ForRepo(a.ctx, repo)
+	f, err := a.forgeForRepo(repo)
 	if err != nil {
 		return "", fmt.Errorf("creating forge for %s: %w", repo, err)
 	}
