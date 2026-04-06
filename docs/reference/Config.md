@@ -551,6 +551,7 @@ commit:
 | `repos` | `clusters.targets.repos` | []string | No | — | []string value |
 | `id` | `clusters.targets.groups.id` | string | No | — | string value |
 | `repos` | `clusters.targets.groups.repos` | []string | Yes | — | []string value |
+| `credentials` | `clusters.targets.credentials` | string | No | — | string value |
 | `stagefreight` | `clusters.stagefreight` | map[string]any | Yes | — | map[string]any value |
 
 ---
