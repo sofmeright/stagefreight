@@ -55,7 +55,7 @@ func resolveWorkspace(ciCtx *ci.CIContext) string {
 func buildRunner(ctx context.Context, appCfg *config.Config, ciCtx *ci.CIContext, opts ci.RunOptions) error {
 	// Policy gate: skip non-release tags (e.g., rolling "latest" tag)
 	if ciCtx.IsTag() && !tagMatchesReleasePolicy(ciCtx.Tag, appCfg.Versioning) {
-		fmt.Printf("  build: skipping — tag %q does not match any release policy\n", ciCtx.Tag)
+		fmt.Printf("  build: skipping — tag %q does not match any release tag source\n", ciCtx.Tag)
 		return nil
 	}
 
@@ -455,7 +455,7 @@ func runDependencyUpdateLogic(ctx context.Context, appCfg *config.Config, rootDi
 func securityRunner(ctx context.Context, appCfg *config.Config, ciCtx *ci.CIContext, opts ci.RunOptions) error {
 	// Policy gate: skip non-release tags
 	if ciCtx.IsTag() && !tagMatchesReleasePolicy(ciCtx.Tag, appCfg.Versioning) {
-		fmt.Printf("  security: skipping — tag %q does not match any release policy\n", ciCtx.Tag)
+		fmt.Printf("  security: skipping — tag %q does not match any release tag source\n", ciCtx.Tag)
 		return nil
 	}
 
@@ -542,7 +542,7 @@ func securityRunner(ctx context.Context, appCfg *config.Config, ciCtx *ci.CICont
 func docsRunner(ctx context.Context, appCfg *config.Config, ciCtx *ci.CIContext, opts ci.RunOptions) error {
 	// Policy gate: skip non-release tags
 	if ciCtx.IsTag() && !tagMatchesReleasePolicy(ciCtx.Tag, appCfg.Versioning) {
-		fmt.Printf("  docs: skipping — tag %q does not match any release policy\n", ciCtx.Tag)
+		fmt.Printf("  docs: skipping — tag %q does not match any release tag source\n", ciCtx.Tag)
 		return nil
 	}
 
@@ -737,7 +737,7 @@ func releaseRunner(ctx context.Context, appCfg *config.Config, ciCtx *ci.CIConte
 	// Policy gate: check if tag matches ANY release target's when conditions.
 	// Uses the same target enumeration as RunReleaseCreate (collectTargetsByKind + targetWhenMatches).
 	if !releaseTagMatchesAnyTarget(appCfg, tag) {
-		reason := fmt.Sprintf("tag %q does not match any release policy", tag)
+		reason := fmt.Sprintf("tag %q does not match any release tag source", tag)
 		renderReleaseSkip(ciCtx, releaseSkipPolicyMismatch, reason)
 		if err := cistate.UpdateState(rootDir, func(st *cistate.State) {
 			st.RecordSubsystem(cistate.SubsystemState{

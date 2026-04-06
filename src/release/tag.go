@@ -29,7 +29,7 @@ type BuildTagPlanOptions struct {
 	TargetRef       string // default HEAD
 	FromRef         string // optional previous boundary override
 	MessageOverride string
-	TagPatterns     []string // from policies.git_tags
+	TagPatterns     []string // from versioning.tag_sources
 	Glossary        config.GlossaryConfig
 	Presentation    config.TagPresentation
 }

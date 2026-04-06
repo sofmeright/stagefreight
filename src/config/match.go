@@ -249,10 +249,11 @@ func CompilePatternsWithWarnings(patterns []string, policyMap map[string]string)
 	return cp, warnings, nil
 }
 
-// ResolvePatterns resolves policy name tokens in a pattern list to their
-// regex values from the policy map. Direct regex patterns pass through unchanged.
+// ResolvePatterns resolves named tokens in a pattern list to their regex
+// values from the provided name→regex map (e.g. matchers.branches or a
+// flattened tag_sources map). Direct regex patterns pass through unchanged.
 // Negation prefix (!) is preserved.
-func ResolvePatterns(patterns []string, policyMap map[string]string) []string {
+func ResolvePatterns(patterns []string, patternMap map[string]string) []string {
 	if len(patterns) == 0 {
 		return nil
 	}
@@ -266,8 +267,8 @@ func ResolvePatterns(patterns []string, policyMap map[string]string) []string {
 			raw = raw[1:]
 		}
 
-		// Try to resolve as policy name
-		val, _ := resolveTokenWithWarning(raw, policyMap)
+		// Try to resolve as a named pattern
+		val, _ := resolveTokenWithWarning(raw, patternMap)
 
 		prefix := ""
 		if negate {
@@ -278,18 +279,18 @@ func ResolvePatterns(patterns []string, policyMap map[string]string) []string {
 	return resolved
 }
 
-// resolveTokenWithWarning resolves a single token against the policy map.
+// resolveTokenWithWarning resolves a single token against the pattern map.
 // Returns the resolved pattern and an optional warning string.
-func resolveTokenWithWarning(token string, policyMap map[string]string) (string, string) {
-	// If it's an identifier and exists in policy map, resolve it
+func resolveTokenWithWarning(token string, patternMap map[string]string) (string, string) {
+	// If it's an identifier and exists in the map, resolve it
 	if isIdentifier(token) {
-		if regex, ok := policyMap[token]; ok {
+		if regex, ok := patternMap[token]; ok {
 			return regex, ""
 		}
-		// Identifier-like but not in policy map
+		// Identifier-like but not in pattern map
 		if !containsRegexMeta(token) {
 			// Looks like a typo — identifier-like, not in map, no metacharacters
-			return token, fmt.Sprintf("unknown policy name %q; treating as regex", token)
+			return token, fmt.Sprintf("unknown pattern name %q; treating as regex", token)
 		}
 	}
 
@@ -297,8 +298,9 @@ func resolveTokenWithWarning(token string, policyMap map[string]string) (string,
 	return token, ""
 }
 
-// MatchPatternsWithPolicy resolves policy names and evaluates patterns against a value.
+// MatchPatternsWithPolicy resolves named patterns and evaluates them against a value.
 // Convenience wrapper combining ResolvePatterns + MatchPatterns.
+// (Name retained for backward compat with existing call sites.)
 func MatchPatternsWithPolicy(patterns []string, value string, policyMap map[string]string) bool {
 	if len(patterns) == 0 {
 		return true
