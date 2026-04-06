@@ -214,6 +214,283 @@ security:
 	}
 }
 
+// --- presets: [...] ordered composition tests ---
+
+func TestResolvePresetList_OrderedComposition(t *testing.T) {
+	loader := fakeLoader{
+		"preset/a.yml": `
+targets:
+  - id: alpha
+    kind: registry
+`,
+		"preset/b.yml": `
+targets:
+  - id: beta
+    kind: registry
+`,
+	}
+
+	raw := map[string]any{
+		"targets": map[string]any{
+			"presets": []any{"preset/a.yml", "preset/b.yml"},
+		},
+	}
+
+	resolved, _, err := ResolvePresets(raw, loader, "test@v1", "inline", 0, nil)
+	requireNoError(t, err)
+
+	items := resolved["targets"].([]any)
+	requireEqual(t, 2, len(items), "expected 2 targets")
+	requireEqual(t, "alpha", items[0].(map[string]any)["id"], "first item should be alpha")
+	requireEqual(t, "beta", items[1].(map[string]any)["id"], "second item should be beta")
+}
+
+func TestResolvePresetList_DuplicateIDHardFails(t *testing.T) {
+	loader := fakeLoader{
+		"preset/a.yml": `
+targets:
+  - id: shared-release
+    kind: release
+`,
+		"preset/b.yml": `
+targets:
+  - id: shared-release
+    kind: release
+`,
+	}
+
+	raw := map[string]any{
+		"targets": map[string]any{
+			"presets": []any{"preset/a.yml", "preset/b.yml"},
+		},
+	}
+
+	_, _, err := ResolvePresets(raw, loader, "test@v1", "inline", 0, nil)
+	requireError(t, err)
+	requireTrue(t, indexOf(err.Error(), "preset/a.yml") >= 0, "error should name first contributing preset")
+	requireTrue(t, indexOf(err.Error(), "preset/b.yml") >= 0, "error should name duplicate preset")
+}
+
+func TestResolvePresetList_NarratorTwoLevelMerge(t *testing.T) {
+	loader := fakeLoader{
+		"preset/narrator-a.yml": `
+narrator:
+  - file: README.md
+    items:
+      - id: badge.build
+        kind: badge_ref
+        ref: build
+`,
+		"preset/narrator-b.yml": `
+narrator:
+  - file: README.md
+    items:
+      - id: badge.license
+        kind: badge_ref
+        ref: license
+`,
+	}
+
+	raw := map[string]any{
+		"narrator": map[string]any{
+			"presets": []any{"preset/narrator-a.yml", "preset/narrator-b.yml"},
+		},
+	}
+
+	resolved, _, err := ResolvePresets(raw, loader, "test@v1", "inline", 0, nil)
+	requireNoError(t, err)
+
+	narr := resolved["narrator"].([]any)
+	requireEqual(t, 1, len(narr), "same file should be merged into one entry")
+
+	entry := narr[0].(map[string]any)
+	requireEqual(t, "README.md", entry["file"], "file should be README.md")
+
+	items := entry["items"].([]any)
+	requireEqual(t, 2, len(items), "items from both presets should be merged")
+}
+
+func TestResolvePresetList_NarratorDuplicateItemID(t *testing.T) {
+	loader := fakeLoader{
+		"preset/narrator-a.yml": `
+narrator:
+  - file: README.md
+    items:
+      - id: badge.build
+        kind: badge_ref
+`,
+		"preset/narrator-b.yml": `
+narrator:
+  - file: README.md
+    items:
+      - id: badge.build
+        kind: badge_ref
+`,
+	}
+
+	raw := map[string]any{
+		"narrator": map[string]any{
+			"presets": []any{"preset/narrator-a.yml", "preset/narrator-b.yml"},
+		},
+	}
+
+	_, _, err := ResolvePresets(raw, loader, "test@v1", "inline", 0, nil)
+	requireError(t, err)
+	requireTrue(t, indexOf(err.Error(), "badge.build") >= 0, "error should name the duplicate item id")
+}
+
+func TestResolvePresetList_LocalSiblingsAppend(t *testing.T) {
+	loader := fakeLoader{
+		"preset/targets-base.yml": `
+targets:
+  - id: preset-target
+    kind: registry
+`,
+	}
+
+	raw := map[string]any{
+		"targets": map[string]any{
+			"presets": []any{"preset/targets-base.yml"},
+			"items": []any{
+				map[string]any{"id": "inline-target", "kind": "binary-archive"},
+			},
+		},
+	}
+
+	resolved, _, err := ResolvePresets(raw, loader, "test@v1", "inline", 0, nil)
+	requireNoError(t, err)
+
+	items := resolved["targets"].([]any)
+	requireEqual(t, 2, len(items), "expected preset item + inline item")
+	requireEqual(t, "preset-target", items[0].(map[string]any)["id"], "preset item first")
+	requireEqual(t, "inline-target", items[1].(map[string]any)["id"], "inline item appended after presets")
+}
+
+func TestResolvePresetList_MissingNavPathHardFails(t *testing.T) {
+	loader := fakeLoader{
+		"preset/invalid.yml": `
+badges:
+  wrong_key:
+    - id: build
+`,
+	}
+
+	raw := map[string]any{
+		"badges": map[string]any{
+			"items": map[string]any{
+				"presets": []any{"preset/invalid.yml"},
+			},
+		},
+	}
+
+	_, _, err := ResolvePresets(raw, loader, "test@v1", "inline", 0, nil)
+	requireError(t, err)
+	requireTrue(t, indexOf(err.Error(), "items") >= 0, "error should mention the missing navigation key")
+}
+
+func TestResolvePresetList_PresetAndPresetsBothSet(t *testing.T) {
+	loader := fakeLoader{}
+
+	raw := map[string]any{
+		"targets": map[string]any{
+			"preset":  "preset/a.yml",
+			"presets": []any{"preset/b.yml"},
+		},
+	}
+
+	_, _, err := ResolvePresets(raw, loader, "test@v1", "inline", 0, nil)
+	requireError(t, err)
+}
+
+func TestResolvePresetList_PresetsOnNonKeyedSection(t *testing.T) {
+	loader := fakeLoader{}
+
+	raw := map[string]any{
+		"security": map[string]any{
+			"presets": []any{"preset/security.yml"},
+		},
+	}
+
+	_, _, err := ResolvePresets(raw, loader, "test@v1", "inline", 0, nil)
+	requireError(t, err)
+}
+
+func TestResolvePresetList_EmptyList(t *testing.T) {
+	loader := fakeLoader{}
+
+	raw := map[string]any{
+		"targets": map[string]any{
+			"presets": []any{},
+		},
+	}
+
+	resolved, _, err := ResolvePresets(raw, loader, "test@v1", "inline", 0, nil)
+	requireNoError(t, err)
+
+	items, _ := resolved["targets"].([]any)
+	requireEqual(t, 0, len(items), "empty presets should produce empty list")
+}
+
+func TestResolvePresetList_BackCompatSinglePreset(t *testing.T) {
+	loader := fakeLoader{
+		"preset/security.yml": `
+security:
+  enabled: true
+  sbom: true
+`,
+	}
+
+	raw := map[string]any{
+		"security": map[string]any{
+			"preset": "preset/security.yml",
+		},
+	}
+
+	resolved, _, err := ResolvePresets(raw, loader, "test@v1", "inline", 0, nil)
+	requireNoError(t, err)
+
+	sec := resolved["security"].(map[string]any)
+	requireEqual(t, true, sec["enabled"], "backward compat: preset: form still works for enabled")
+	requireEqual(t, true, sec["sbom"], "backward compat: preset: form still works for sbom")
+}
+
+func TestResolvePresetList_ProvenanceTagging(t *testing.T) {
+	loader := fakeLoader{
+		"preset/targets-a.yml": `
+targets:
+  - id: alpha
+    kind: registry
+`,
+		"preset/targets-b.yml": `
+targets:
+  - id: beta
+    kind: registry
+`,
+	}
+
+	raw := map[string]any{
+		"targets": map[string]any{
+			"presets": []any{"preset/targets-a.yml", "preset/targets-b.yml"},
+		},
+	}
+
+	_, entries, err := ResolvePresets(raw, loader, "test@v1", "inline", 0, nil)
+	requireNoError(t, err)
+
+	alphaSource := ""
+	betaSource := ""
+	for _, e := range entries {
+		if indexOf(e.Path, "alpha") >= 0 {
+			alphaSource = e.Source
+		}
+		if indexOf(e.Path, "beta") >= 0 {
+			betaSource = e.Source
+		}
+	}
+	requireEqual(t, "preset:preset/targets-a.yml", alphaSource, "alpha should be tagged with targets-a.yml")
+	requireEqual(t, "preset:preset/targets-b.yml", betaSource, "beta should be tagged with targets-b.yml")
+}
+
 // --- Renderer Tests ---
 
 func TestRenderSealedConfig_Deterministic(t *testing.T) {
@@ -253,7 +530,7 @@ func TestRenderSealedConfig_HasSeal(t *testing.T) {
 
 	s := string(out)
 	requireTrue(t, indexOf(s, "GENERATED / ENFORCED BY STAGEFREIGHT GOVERNANCE") >= 0, "seal header missing")
-	requireTrue(t, indexOf(s, "MaintenancePolicy") >= 0, "source repo missing from seal")
+	requireTrue(t, indexOf(s, "policy-repo") >= 0, "source repo missing from seal")
 	requireTrue(t, indexOf(s, "v1.0.0") >= 0, "source ref missing from seal")
 	requireTrue(t, indexOf(s, "docker-services") >= 0, "cluster ID missing from seal")
 }

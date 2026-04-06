@@ -7,6 +7,17 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// keyedListSections maps section path to the item key field for ordered list composition.
+// Only sections listed here may use the presets: [...] form.
+var keyedListSections = map[string]string{
+	"targets":                  "id",
+	"builds":                   "id",
+	"badges.items":             "id",
+	"versioning.tag_sources":   "id",
+	"versioning.branch_builds": "id",
+	"narrator":                 "file",
+}
+
 // PresetLoader fetches preset content by path.
 // Implementations: local filesystem, git repo checkout.
 type PresetLoader interface {
@@ -23,18 +34,29 @@ func ResolvePresets(raw map[string]any, loader PresetLoader, sourceRef, sourcePa
 	if seen == nil {
 		seen = make(map[string]bool)
 	}
+	return resolvePresetsInner(raw, loader, sourceRef, sourcePath, depth, seen, "")
+}
 
+// resolvePresetsInner is the internal recursive implementation.
+// pathPrefix is the absolute dotted path of the parent section (empty at root).
+// All MergeEntry.Path values returned are absolute (pathPrefix + "." + key).
+func resolvePresetsInner(raw map[string]any, loader PresetLoader, sourceRef, sourcePath string, depth int, seen map[string]bool, pathPrefix string) (map[string]any, []MergeEntry, error) {
 	var entries []MergeEntry
 	result := make(map[string]any)
 
 	for key, val := range raw {
+		currentPath := key
+		if pathPrefix != "" {
+			currentPath = pathPrefix + "." + key
+		}
+
 		section, ok := val.(map[string]any)
 		if !ok {
 			// Scalar or list — copy directly.
 			result[key] = val
 			entries = append(entries, MergeEntry{
-				Path:      key,
-				Source:     sourcePath,
+				Path:      currentPath,
+				Source:    sourcePath,
 				SourceRef: sourceRef,
 				Layer:     depth,
 				Operation: "set",
@@ -43,21 +65,46 @@ func ResolvePresets(raw map[string]any, loader PresetLoader, sourceRef, sourcePa
 			continue
 		}
 
-		// Check for preset: reference in this section.
 		presetPath, hasPreset := extractPresetPath(section)
+		presetsList, hasPresets := extractPresetsList(section)
+
+		if hasPreset && hasPresets {
+			return nil, nil, fmt.Errorf("%s: cannot specify both preset: and presets:", currentPath)
+		}
+
+		// presets: [...] — ordered composition for keyed-collection sections only.
+		if hasPresets {
+			keyField, isKeyed := keyedListSections[currentPath]
+			if !isKeyed {
+				return nil, nil, fmt.Errorf("%s: presets: is only allowed on keyed-collection sections (targets, builds, narrator, badges.items, versioning.tag_sources, versioning.branch_builds)", currentPath)
+			}
+			list, listEntries, err := resolvePresetList(presetsList, currentPath, section, loader, sourceRef, sourcePath, depth, seen, keyField)
+			if err != nil {
+				return nil, nil, err
+			}
+			if currentPath == "narrator" {
+				list, err = mergeNarratorEntries(list)
+				if err != nil {
+					return nil, nil, err
+				}
+			}
+			result[key] = list
+			entries = append(entries, listEntries...)
+			continue
+		}
+
 		if !hasPreset {
 			// No preset — recurse into subsections.
-			resolved, subEntries, err := ResolvePresets(section, loader, sourceRef, sourcePath, depth, seen)
+			resolved, subEntries, err := resolvePresetsInner(section, loader, sourceRef, sourcePath, depth, seen, currentPath)
 			if err != nil {
 				return nil, nil, fmt.Errorf("%s: %w", key, err)
 			}
 			result[key] = resolved
-			for i := range subEntries {
-				subEntries[i].Path = key + "." + subEntries[i].Path
-			}
 			entries = append(entries, subEntries...)
 			continue
 		}
+
+		// --- Single preset: "path" handling ---
 
 		// Cycle detection.
 		if seen[presetPath] {
@@ -85,18 +132,15 @@ func ResolvePresets(raw map[string]any, loader PresetLoader, sourceRef, sourcePa
 		presetSection, isMap := presetValue.(map[string]any)
 
 		// If the preset value is a list (e.g., targets: [...]), use it directly.
-		// No recursive resolution needed for list-type sections.
 		if !isMap {
-			// List or scalar preset — merge directly. Local sibling keys override.
 			localOverrides := withoutKey(section, "preset")
 			if len(localOverrides) > 0 {
-				// Can't deep-merge into a list — local replaces entirely.
 				result[key] = localOverrides
 			} else {
 				result[key] = presetValue
 			}
 			entries = append(entries, MergeEntry{
-				Path:      key,
+				Path:      currentPath,
 				Source:    "preset:" + presetPath,
 				SourceRef: sourceRef,
 				Layer:     depth + 1,
@@ -119,8 +163,9 @@ func ResolvePresets(raw map[string]any, loader PresetLoader, sourceRef, sourcePa
 			}
 
 			// Recursively resolve the inner preset first (depth-first).
+			// Use pathPrefix="" so the inner wrapped map builds absolute paths from root.
 			innerWrapped := map[string]any{topKey: map[string]any{"preset": innerPresetPath}}
-			resolvedInner, innerEntries, err := ResolvePresets(innerWrapped, loader, sourceRef, presetPath, depth+1, seen)
+			resolvedInner, innerEntries, err := resolvePresetsInner(innerWrapped, loader, sourceRef, presetPath, depth+1, seen, "")
 			if err != nil {
 				return nil, nil, fmt.Errorf("%s: resolving nested preset %q in %q: %w", key, innerPresetPath, presetPath, err)
 			}
@@ -131,29 +176,28 @@ func ResolvePresets(raw map[string]any, loader PresetLoader, sourceRef, sourcePa
 			resolvedPreset = DeepMerge(innerSection, currentOverrides)
 			presetEntries = innerEntries
 		} else {
-			// No nested preset — just recurse into subsections of the preset content.
-			var err error
-			resolvedPreset, presetEntries, err = ResolvePresets(presetSection, loader, sourceRef, presetPath, depth+1, seen)
+			// No nested preset — recurse into subsections of the preset content.
+			// Pass currentPath so entries are built with absolute paths.
+			resolvedPreset, presetEntries, err = resolvePresetsInner(presetSection, loader, sourceRef, presetPath, depth+1, seen, currentPath)
 			if err != nil {
 				return nil, nil, fmt.Errorf("%s: resolving preset %q: %w", key, presetPath, err)
 			}
 		}
 
-		// Record preset entries with provenance.
+		// Tag all preset entries with this preset's source.
+		// Paths are already absolute — no prefixing needed.
 		for i := range presetEntries {
-			presetEntries[i].Path = key + "." + presetEntries[i].Path
 			presetEntries[i].Source = "preset:" + presetPath
 		}
 		entries = append(entries, presetEntries...)
 
 		// Local siblings (everything except preset: key) override the preset.
 		localOverrides := withoutKey(section, "preset")
-
 		merged := DeepMerge(resolvedPreset, localOverrides)
 
 		// Mark preset entries that got overridden by local keys.
 		for localKey := range localOverrides {
-			overriddenPath := key + "." + localKey
+			overriddenPath := currentPath + "." + localKey
 			for i := range entries {
 				if entries[i].Path == overriddenPath && !entries[i].Overridden {
 					entries[i].Overridden = true
@@ -164,15 +208,14 @@ func ResolvePresets(raw map[string]any, loader PresetLoader, sourceRef, sourcePa
 
 		// Record local override entries.
 		for localKey, localVal := range localOverrides {
-			path := key + "." + localKey
+			path := currentPath + "." + localKey
 			op := "override"
-			// Detect list replacement.
 			if _, isList := localVal.([]any); isList {
 				op = "replace"
 			}
 			entries = append(entries, MergeEntry{
 				Path:      path,
-				Source:     sourcePath,
+				Source:    sourcePath,
 				SourceRef: sourceRef,
 				Layer:     depth,
 				Operation: op,
@@ -189,6 +232,222 @@ func ResolvePresets(raw map[string]any, loader PresetLoader, sourceRef, sourcePa
 	return result, entries, nil
 }
 
+// resolvePresetList loads and merges an ordered list of presets for a keyed-collection section.
+// sectionPath is the dotted path (e.g., "targets", "badges.items", "versioning.tag_sources").
+// section is the raw section map (contains "presets" key and any local sibling items).
+// keyField is the item identity field ("id" or "file").
+// Items are collected in preset declaration order; local siblings are appended last.
+// Duplicate key field values across presets are a hard error naming both contributing presets.
+func resolvePresetList(
+	presets []string,
+	sectionPath string,
+	section map[string]any,
+	loader PresetLoader,
+	sourceRef, sourcePath string,
+	depth int,
+	seen map[string]bool,
+	keyField string,
+) ([]any, []MergeEntry, error) {
+	// Parse navigation path from sectionPath.
+	// "targets"        → topKey="targets", navPath=[]
+	// "badges.items"   → topKey="badges",  navPath=["items"]
+	parts := strings.SplitN(sectionPath, ".", 2)
+	topKey := parts[0]
+	var navPath []string
+	if len(parts) > 1 {
+		navPath = strings.Split(parts[1], ".")
+	}
+
+	var collected []any
+	var entries []MergeEntry
+	seenIDs := make(map[string]string) // key-field value → contributing preset path
+
+	for _, presetPath := range presets {
+		if seen[presetPath] {
+			return nil, nil, fmt.Errorf("%s: circular preset reference: %s", sectionPath, presetPath)
+		}
+		seen[presetPath] = true
+
+		content, err := loader.Load(presetPath)
+		if err != nil {
+			return nil, nil, fmt.Errorf("%s: loading preset %q: %w", sectionPath, presetPath, err)
+		}
+
+		loadedTopKey, parsed, err := ValidatePreset(content)
+		if err != nil {
+			return nil, nil, fmt.Errorf("%s: preset %q: %w", sectionPath, presetPath, err)
+		}
+
+		if loadedTopKey != topKey {
+			return nil, nil, fmt.Errorf("%s: preset %q declares top-level key %q, expected %q", sectionPath, presetPath, loadedTopKey, topKey)
+		}
+
+		// Navigate to the list using navPath.
+		var listVal any = parsed[topKey]
+		for _, nav := range navPath {
+			m, ok := listVal.(map[string]any)
+			if !ok {
+				return nil, nil, fmt.Errorf("%s: preset %q: expected map while navigating to %q", sectionPath, presetPath, nav)
+			}
+			next, exists := m[nav]
+			if !exists {
+				return nil, nil, fmt.Errorf("%s: preset %q: missing key %q in navigation path", sectionPath, presetPath, nav)
+			}
+			listVal = next
+		}
+
+		items, ok := listVal.([]any)
+		if !ok || listVal == nil {
+			// Empty or missing list — skip this preset.
+			delete(seen, presetPath)
+			continue
+		}
+
+		for _, item := range items {
+			itemMap, ok := item.(map[string]any)
+			if !ok {
+				return nil, nil, fmt.Errorf("%s: preset %q: item is not a map", sectionPath, presetPath)
+			}
+			idVal, hasID := itemMap[keyField]
+			if !hasID {
+				return nil, nil, fmt.Errorf("%s: preset %q: item missing %q field", sectionPath, presetPath, keyField)
+			}
+			idStr := fmt.Sprintf("%v", idVal)
+			// Narrator outer keys (file:) may repeat across presets — mergeNarratorEntries
+			// handles same-file merging and enforces uniqueness at the item id level.
+			if sectionPath != "narrator" {
+				if firstPath, dup := seenIDs[idStr]; dup {
+					return nil, nil, fmt.Errorf("%s: duplicate %s %q\n  first contributed by: %s\n  duplicate from:       %s",
+						sectionPath, keyField, idStr, firstPath, presetPath)
+				}
+				seenIDs[idStr] = presetPath
+			}
+			collected = append(collected, item)
+			entries = append(entries, MergeEntry{
+				Path:      fmt.Sprintf("%s[%s]", sectionPath, idStr),
+				Source:    "preset:" + presetPath,
+				SourceRef: sourceRef,
+				Layer:     depth + 1,
+				Operation: "append",
+				Value:     item,
+			})
+		}
+
+		delete(seen, presetPath)
+	}
+
+	// Inline items: list under "items" key in the section map.
+	// Same shape as preset items — consistent validation path.
+	if inlineList, ok := section["items"].([]any); ok {
+		for _, item := range inlineList {
+			itemMap, ok := item.(map[string]any)
+			if !ok {
+				return nil, nil, fmt.Errorf("%s: inline item is not a map", sectionPath)
+			}
+			idVal, hasID := itemMap[keyField]
+			if !hasID {
+				return nil, nil, fmt.Errorf("%s: inline item missing %q field", sectionPath, keyField)
+			}
+			idStr := fmt.Sprintf("%v", idVal)
+			if firstPath, dup := seenIDs[idStr]; dup {
+				return nil, nil, fmt.Errorf("%s: duplicate %s %q\n  first contributed by: %s\n  duplicate from:       %s (inline)",
+					sectionPath, keyField, idStr, firstPath, sourcePath)
+			}
+			seenIDs[idStr] = sourcePath
+			collected = append(collected, itemMap)
+			entries = append(entries, MergeEntry{
+				Path:      fmt.Sprintf("%s[%s]", sectionPath, idStr),
+				Source:    sourcePath,
+				SourceRef: sourceRef,
+				Layer:     depth,
+				Operation: "append",
+				Value:     itemMap,
+			})
+		}
+	}
+
+	if collected == nil {
+		collected = []any{}
+	}
+	return collected, entries, nil
+}
+
+// mergeNarratorEntries post-processes the narrator list after resolvePresetList.
+// narrator entries are keyed by file:; multiple presets may target the same file.
+// Same-file entries are merged: their items: lists are concatenated in encounter order.
+// Duplicate item id within a file is a hard error.
+func mergeNarratorEntries(list []any) ([]any, error) {
+	type fileEntry struct {
+		fileStr    string
+		seenItemID map[string]bool
+		raw        map[string]any // all fields except items
+		items      []any
+	}
+
+	var order []string
+	byFile := make(map[string]*fileEntry)
+
+	for _, entry := range list {
+		entryMap, ok := entry.(map[string]any)
+		if !ok {
+			continue
+		}
+		fileVal, ok := entryMap["file"]
+		if !ok {
+			continue
+		}
+		fileStr := fmt.Sprintf("%v", fileVal)
+
+		fe, exists := byFile[fileStr]
+		if !exists {
+			fe = &fileEntry{
+				fileStr:    fileStr,
+				seenItemID: make(map[string]bool),
+				raw:        make(map[string]any),
+			}
+			for k, v := range entryMap {
+				if k != "items" {
+					fe.raw[k] = v
+				}
+			}
+			order = append(order, fileStr)
+			byFile[fileStr] = fe
+		}
+
+		items, _ := entryMap["items"].([]any)
+		for _, item := range items {
+			itemMap, ok := item.(map[string]any)
+			if !ok {
+				fe.items = append(fe.items, item)
+				continue
+			}
+			idVal, hasID := itemMap["id"]
+			if !hasID {
+				fe.items = append(fe.items, item)
+				continue
+			}
+			idStr := fmt.Sprintf("%v", idVal)
+			if fe.seenItemID[idStr] {
+				return nil, fmt.Errorf("narrator: duplicate item id %q for file %q", idStr, fileStr)
+			}
+			fe.seenItemID[idStr] = true
+			fe.items = append(fe.items, item)
+		}
+	}
+
+	result := make([]any, 0, len(order))
+	for _, fileStr := range order {
+		fe := byFile[fileStr]
+		m := make(map[string]any, len(fe.raw)+1)
+		for k, v := range fe.raw {
+			m[k] = v
+		}
+		m["items"] = fe.items
+		result = append(result, m)
+	}
+	return result, nil
+}
+
 // ValidatePreset checks that a preset file declares exactly one top-level key.
 // Returns hard error on violation.
 func ValidatePreset(content []byte) (string, map[string]any, error) {
@@ -197,7 +456,6 @@ func ValidatePreset(content []byte) (string, map[string]any, error) {
 		return "", nil, fmt.Errorf("invalid YAML: %w", err)
 	}
 
-	// Filter out comment-only keys (none expected, but be safe).
 	keys := make([]string, 0, len(parsed))
 	for k := range parsed {
 		keys = append(keys, k)
@@ -225,6 +483,27 @@ func extractPresetPath(section map[string]any) (string, bool) {
 		return "", false
 	}
 	return path, true
+}
+
+// extractPresetsList checks if a section map has a "presets" key containing a string list.
+func extractPresetsList(section map[string]any) ([]string, bool) {
+	val, ok := section["presets"]
+	if !ok {
+		return nil, false
+	}
+	list, isList := val.([]any)
+	if !isList {
+		return nil, false
+	}
+	var paths []string
+	for _, item := range list {
+		s, isStr := item.(string)
+		if !isStr || s == "" {
+			return nil, false
+		}
+		paths = append(paths, s)
+	}
+	return paths, true
 }
 
 // withoutKey returns a shallow copy of the map with the specified key removed.
