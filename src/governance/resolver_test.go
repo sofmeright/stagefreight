@@ -243,7 +243,7 @@ func TestRenderSealedConfig_HasSeal(t *testing.T) {
 	}
 
 	seal := SealMeta{
-		SourceRepo: "https://gitlab.prplanit.com/PrPlanIT/MaintenancePolicy",
+		SourceRepo: "https://gitlab.example.com/example-org/policy-repo",
 		SourceRef:  "v1.0.0",
 		ClusterID:  "docker-services",
 	}

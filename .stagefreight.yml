@@ -22,14 +22,14 @@ repos:
   - id: primary
     forge: gitlab
     project: "{var:gitlab_group}/{var:repo}"
-    role: primary
+    roles: [primary]
     default_branch: "main"
     worktree: "."
 
   - id: github-mirror
     forge: github
     project: "{var:github_org}/{var:github_repo}"
-    role: mirror
+    roles: [mirror]
     sync:
       git: true
       releases: true

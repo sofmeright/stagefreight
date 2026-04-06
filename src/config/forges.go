@@ -12,16 +12,33 @@ type ForgeConfig struct {
 }
 
 // RepoConfig declares a project on a forge. References forge by id.
-// Role is explicit: primary, mirror, or omitted (available but no role).
+// Roles are explicit and composable:
+//   - "primary": exactly 1 required — authoritative source
+//   - "mirror": 0 to many — derivative copies
+//   - "publish-origin": 0 or 1 — where rendered artifacts are served from
+//   - empty: addressable, no special behavior
+//
+// Forbidden combinations: primary + mirror (authoritative ≠ derivative).
+// Allowed combinations: publish-origin + primary, publish-origin + mirror.
 type RepoConfig struct {
 	ID            string     `yaml:"id"`                       // unique identifier
 	Forge         string     `yaml:"forge"`                    // references forges[].id
 	Project       string     `yaml:"project"`                  // project path on the forge (e.g., "{var:gitlab_group}/{var:repo}")
-	Role          string     `yaml:"role,omitempty"`           // "primary" | "mirror" | "" (available)
+	Roles         []string   `yaml:"roles,omitempty"`          // ["primary"] | ["mirror"] | ["mirror", "publish-origin"] | []
 	DefaultBranch string     `yaml:"default_branch,omitempty"` // e.g., "main"
 	Worktree      string     `yaml:"worktree,omitempty"`       // local working tree path (primary only)
 	Ref           string     `yaml:"ref,omitempty"`            // pinned ref for non-primary repos (governance, presets)
 	Sync          SyncConfig `yaml:"sync,omitempty"`           // mirror sync domains
+}
+
+// HasRole returns true if the repo has the given role.
+func (r RepoConfig) HasRole(role string) bool {
+	for _, s := range r.Roles {
+		if s == role {
+			return true
+		}
+	}
+	return false
 }
 
 // RegistryConfig declares an OCI registry host. Declared once, referenced by targets.
@@ -68,9 +85,12 @@ func ValidateIdentityGraph(forges []ForgeConfig, repos []RepoConfig, registries 
 		}
 	}
 
-	// Repo IDs unique + forge references valid + exactly one primary.
+	// Repo IDs unique + forge references valid + role validation.
 	repoIDs := make(map[string]bool)
 	primaryCount := 0
+	publishOriginCount := 0
+	validRoles := map[string]bool{"primary": true, "mirror": true, "publish-origin": true}
+
 	for _, r := range repos {
 		if r.ID == "" {
 			errs = append(errs, "repos: entry missing id")
@@ -91,37 +111,48 @@ func ValidateIdentityGraph(forges []ForgeConfig, repos []RepoConfig, registries 
 			errs = append(errs, fmt.Sprintf("repos[%s]: project is required", r.ID))
 		}
 
-		switch r.Role {
-		case "primary":
+		// Validate individual roles.
+		for _, role := range r.Roles {
+			if !validRoles[role] {
+				errs = append(errs, fmt.Sprintf("repos[%s]: unknown role %q (expected primary, mirror, or publish-origin)", r.ID, role))
+			}
+		}
+
+		// Forbidden combination: primary + mirror.
+		if r.HasRole("primary") && r.HasRole("mirror") {
+			errs = append(errs, fmt.Sprintf("repos[%s]: primary and mirror are mutually exclusive (authoritative ≠ derivative)", r.ID))
+		}
+
+		// Count roles for cardinality checks.
+		if r.HasRole("primary") {
 			primaryCount++
 			if r.DefaultBranch == "" {
 				errs = append(errs, fmt.Sprintf("repos[%s]: default_branch is required for primary", r.ID))
 			}
-		case "mirror", "":
-			// valid
-		default:
-			errs = append(errs, fmt.Sprintf("repos[%s]: unknown role %q (expected primary, mirror, or empty)", r.ID, r.Role))
+		}
+		if r.HasRole("publish-origin") {
+			publishOriginCount++
 		}
 
-		if r.Worktree != "" && r.Role != "primary" {
+		// Worktree only valid for primary.
+		if r.Worktree != "" && !r.HasRole("primary") {
 			errs = append(errs, fmt.Sprintf("repos[%s]: worktree is only valid for primary repos", r.ID))
+		}
+
+		// Mirror constraints.
+		if r.HasRole("mirror") && r.Worktree != "" {
+			errs = append(errs, fmt.Sprintf("repos[%s]: mirrors cannot have worktree", r.ID))
 		}
 	}
 
 	if len(repos) > 0 && primaryCount == 0 {
-		errs = append(errs, "repos: exactly one repo must have role: primary")
+		errs = append(errs, "repos: exactly one repo must have roles including primary")
 	}
 	if primaryCount > 1 {
 		errs = append(errs, fmt.Sprintf("repos: exactly one primary allowed, found %d", primaryCount))
 	}
-
-	// Mirror constraints.
-	for _, r := range repos {
-		if r.Role == "mirror" {
-			if r.Worktree != "" {
-				errs = append(errs, fmt.Sprintf("repos[%s]: mirrors cannot have worktree", r.ID))
-			}
-		}
+	if publishOriginCount > 1 {
+		errs = append(errs, fmt.Sprintf("repos: at most one publish-origin allowed, found %d", publishOriginCount))
 	}
 
 	// Registry IDs unique + required fields.
@@ -213,10 +244,10 @@ func FindRepoByID(repos []RepoConfig, id string) *RepoConfig {
 	return nil
 }
 
-// FindRepoByRole returns the first repo with the given role, or nil.
-func FindRepoByRole(repos []RepoConfig, role string) *RepoConfig {
+// FindRepoWithRole returns the first repo that has the given role, or nil.
+func FindRepoWithRole(repos []RepoConfig, role string) *RepoConfig {
 	for i := range repos {
-		if repos[i].Role == role {
+		if repos[i].HasRole(role) {
 			return &repos[i]
 		}
 	}
@@ -233,11 +264,11 @@ func FindRegistryByID(registries []RegistryConfig, id string) *RegistryConfig {
 	return nil
 }
 
-// MirrorRepos returns all repos with role "mirror".
+// MirrorRepos returns all repos with the mirror role.
 func MirrorRepos(repos []RepoConfig) []RepoConfig {
 	var mirrors []RepoConfig
 	for _, r := range repos {
-		if r.Role == "mirror" {
+		if r.HasRole("mirror") {
 			mirrors = append(mirrors, r)
 		}
 	}

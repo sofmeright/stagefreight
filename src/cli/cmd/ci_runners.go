@@ -1024,7 +1024,7 @@ func syncMirrorsWithMode(ctx context.Context, appCfg *config.Config, readOnly bo
 // Exported for use in release_create.go where legacy sync targets are executed.
 func LegacySyncOverlapsMirror(targetProvider string, appCfg *config.Config) bool {
 	for _, r := range appCfg.Repos {
-		if r.Role == "mirror" {
+		if r.HasRole("mirror") {
 			f := config.FindForgeByID(appCfg.Forges, r.Forge)
 			if f != nil && f.Provider == targetProvider {
 				return true

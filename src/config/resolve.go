@@ -9,15 +9,25 @@ import (
 // from the forge + repo graph. Ready for forge client creation.
 type ResolvedRepo struct {
 	ID            string
-	Provider      string // from forge
-	BaseURL       string // from forge
-	Project       string // from repo
-	Credentials   string // from forge
-	Role          string // primary, mirror, or ""
+	Provider      string   // from forge
+	BaseURL       string   // from forge
+	Project       string   // from repo
+	Credentials   string   // from forge
+	Roles         []string // from repo (primary, mirror, publish-origin)
 	DefaultBranch string
 	Worktree      string
 	Ref           string
 	Sync          SyncConfig
+}
+
+// HasRole returns true if the resolved repo has the given role.
+func (r ResolvedRepo) HasRole(role string) bool {
+	for _, s := range r.Roles {
+		if s == role {
+			return true
+		}
+	}
+	return false
 }
 
 // ResolvedRegistry is a fully resolved registry target with all identity
@@ -44,7 +54,7 @@ func ResolveRepo(repo RepoConfig, forges []ForgeConfig, vars map[string]string) 
 		BaseURL:       resolveVarsInline(forge.URL, vars),
 		Project:       resolveVarsInline(repo.Project, vars),
 		Credentials:   forge.Credentials,
-		Role:          repo.Role,
+		Roles:         repo.Roles,
 		DefaultBranch: repo.DefaultBranch,
 		Worktree:      repo.Worktree,
 		Ref:           repo.Ref,
@@ -82,7 +92,7 @@ func ResolveRegistryForTarget(target TargetConfig, registries []RegistryConfig, 
 func ResolveAllMirrors(repos []RepoConfig, forges []ForgeConfig, vars map[string]string) ([]*ResolvedRepo, error) {
 	var mirrors []*ResolvedRepo
 	for _, r := range repos {
-		if r.Role != "mirror" {
+		if !r.HasRole("mirror") {
 			continue
 		}
 		resolved, err := ResolveRepo(r, forges, vars)
@@ -96,7 +106,7 @@ func ResolveAllMirrors(repos []RepoConfig, forges []ForgeConfig, vars map[string
 
 // ResolvePrimary resolves the primary repo against the forge graph.
 func ResolvePrimary(repos []RepoConfig, forges []ForgeConfig, vars map[string]string) (*ResolvedRepo, error) {
-	primary := FindRepoByRole(repos, "primary")
+	primary := FindRepoWithRole(repos, "primary")
 	if primary == nil {
 		return nil, fmt.Errorf("no primary repo defined")
 	}
