@@ -872,7 +872,7 @@ func releaseTagMatchesAnyTarget(appCfg *config.Config, tag string) bool {
 			continue
 		}
 		hasConstraints = true
-		if targetWhenMatches(t, tag, tagPatternMap, appCfg.Policies.Branches) {
+		if targetWhenMatches(t, tag, tagPatternMap, appCfg.Matchers.Branches) {
 			return true
 		}
 	}

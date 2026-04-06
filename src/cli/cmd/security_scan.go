@@ -308,7 +308,7 @@ func RunSecurityScan(req SecurityScanRequest) error {
 	artifacts := append([]string{}, result.Artifacts...)
 
 	// Resolve detail level from rules (CLI override > tag/branch rules > default)
-	detail := security.ResolveDetailLevel(req.Config.Security, req.Detail, req.Config.Policies)
+	detail := security.ResolveDetailLevel(req.Config.Security, req.Detail, req.Config.Matchers)
 
 	// Build and write summary
 	_, summaryBody := security.BuildSummary(result, detail)

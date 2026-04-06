@@ -62,7 +62,7 @@ func versioningOptsFromConfig(cfg *config.Config) (*gitver.VersioningOpts, error
 			// Fail closed: do not silently accept an empty regex if the
 			// matcher reference is unknown. Validation should already have
 			// caught this, but double-enforce here — defense in depth.
-			pattern, ok := cfg.Policies.Branches[bb.Match]
+			pattern, ok := cfg.Matchers.Branches[bb.Match]
 			if !ok {
 				return nil, fmt.Errorf(
 					"versioning: branch_build %q references unknown matcher %q",

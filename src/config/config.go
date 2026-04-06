@@ -38,10 +38,10 @@ type Config struct {
 	// Versioning controls how version identity is derived from git state.
 	Versioning VersioningConfig `yaml:"versioning"`
 
-	// Policies defines named regex patterns for branch matching.
-	// git_tags moved to versioning.tags — policies retains only branches
-	// until Phase 4 migrates them to matchers.
-	Policies PoliciesConfig `yaml:"policies"`
+	// Matchers defines reusable named patterns for branches (and future
+	// dimensions). Pattern definitions only — no behavior. Referenced by
+	// branch_builds[].match and target.when.branches.
+	Matchers MatchersConfig `yaml:"matchers"`
 
 	// Builds defines named build artifacts.
 	Builds []BuildConfig `yaml:"builds"`
@@ -160,7 +160,7 @@ func defaults() *Config {
 		Version:    1,
 		Vars:       map[string]string{},
 		Versioning: DefaultVersioningConfig(),
-		Policies:   DefaultPoliciesConfig(),
+		Matchers:   DefaultMatchersConfig(),
 		Lint:       DefaultLintConfig(),
 		Security:   DefaultSecurityConfig(),
 		Commit:     DefaultCommitConfig(),

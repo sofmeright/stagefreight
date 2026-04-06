@@ -143,7 +143,7 @@ func planDockerBuild(b config.BuildConfig, cfg *config.Config, det *build.Detect
 		}
 
 		// Check when conditions
-		if !targetAllowed(t, currentBranch, currentGitTag, tagPatternMap, cfg.Policies.Branches) {
+		if !targetAllowed(t, currentBranch, currentGitTag, tagPatternMap, cfg.Matchers.Branches) {
 			continue
 		}
 

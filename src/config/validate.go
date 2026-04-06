@@ -74,8 +74,8 @@ func Validate(cfg *Config) (warnings []string, err error) {
 		} else {
 			if bb.Match == "" {
 				errs = append(errs, fmt.Sprintf("%s: match is required for non-default entries", bbpath))
-			} else if _, ok := cfg.Policies.Branches[bb.Match]; !ok {
-				errs = append(errs, fmt.Sprintf("%s: match %q not found in policies.branches", bbpath, bb.Match))
+			} else if _, ok := cfg.Matchers.Branches[bb.Match]; !ok {
+				errs = append(errs, fmt.Sprintf("%s: match %q not found in matchers.branches", bbpath, bb.Match))
 			} else {
 				// duplicate-match detection: two non-default rules must not share the same match
 				if prev, seen := matchToRuleID[bb.Match]; seen {
@@ -128,11 +128,16 @@ func Validate(cfg *Config) (warnings []string, err error) {
 		errs = append(errs, fmt.Sprintf("versioning.no_lineage: unknown mode %q (expected error or explicit)", cfg.Versioning.NoLineage.Mode))
 	}
 
-	// ── Policies (branches only — git_tags moved to versioning.tags) ─────
+	// ── Matchers ────────────────────────────────────────────────────────
 
-	for name := range cfg.Policies.Branches {
+	for name, pattern := range cfg.Matchers.Branches {
 		if !isIdentifier(name) {
-			errs = append(errs, fmt.Sprintf("policies.branches: key %q is not a valid identifier (must match [a-zA-Z][a-zA-Z0-9_.\\-]*)", name))
+			errs = append(errs, fmt.Sprintf("matchers.branches: key %q is not a valid identifier (must match [a-zA-Z][a-zA-Z0-9_.\\-]*)", name))
+		}
+		if pattern == "" {
+			errs = append(errs, fmt.Sprintf("matchers.branches[%s]: pattern is required", name))
+		} else if _, rerr := regexp.Compile(pattern); rerr != nil {
+			errs = append(errs, fmt.Sprintf("matchers.branches[%s]: pattern %q is not a valid regex: %v", name, pattern, rerr))
 		}
 	}
 
@@ -247,11 +252,11 @@ func Validate(cfg *Config) (warnings []string, err error) {
 		}
 
 		// Kind-specific validation
-		terrs := validateTarget(t, tpath, buildIDs, cfg.Policies, cfg.Registries)
+		terrs := validateTarget(t, tpath, buildIDs, cfg.Matchers, cfg.Registries)
 		errs = append(errs, terrs...)
 
 		// When block validation
-		werrs := validateWhen(t.When, tpath, cfg.Versioning, cfg.Policies)
+		werrs := validateWhen(t.When, tpath, cfg.Versioning, cfg.Matchers)
 		errs = append(errs, werrs...)
 	}
 
@@ -471,7 +476,7 @@ func Validate(cfg *Config) (warnings []string, err error) {
 	// Cross-check declared branch matchers against references. If a matcher
 	// is defined but unused, it's almost always a typo or leftover cruft.
 	// Warn, don't block — just diagnostic.
-	if len(cfg.Policies.Branches) > 0 {
+	if len(cfg.Matchers.Branches) > 0 {
 		referenced := make(map[string]bool)
 		for _, bb := range cfg.Versioning.BranchBuilds {
 			if bb.Match != "" {
@@ -485,7 +490,7 @@ func Validate(cfg *Config) (warnings []string, err error) {
 				}
 			}
 		}
-		for name := range cfg.Policies.Branches {
+		for name := range cfg.Matchers.Branches {
 			if !referenced[name] {
 				warnings = append(warnings, fmt.Sprintf(
 					"matcher %q is defined but not referenced by any branch_build or target.when.branches",
@@ -501,7 +506,7 @@ func Validate(cfg *Config) (warnings []string, err error) {
 }
 
 // validateTarget checks kind-specific field constraints on a target.
-func validateTarget(t TargetConfig, path string, buildIDs map[string]bool, policies PoliciesConfig, registries []RegistryConfig) []string {
+func validateTarget(t TargetConfig, path string, buildIDs map[string]bool, matchers MatchersConfig, registries []RegistryConfig) []string {
 	var errs []string
 
 	switch t.Kind {
@@ -614,7 +619,7 @@ func validateTarget(t TargetConfig, path string, buildIDs map[string]bool, polic
 }
 
 // validateWhen checks the when block for valid pattern references and events.
-func validateWhen(w TargetCondition, path string, versioning VersioningConfig, policies PoliciesConfig) []string {
+func validateWhen(w TargetCondition, path string, versioning VersioningConfig, matchers MatchersConfig) []string {
 	var errs []string
 
 	// Build tag source id set for when.git_tags reference validation.
@@ -641,8 +646,8 @@ func validateWhen(w TargetCondition, path string, versioning VersioningConfig, p
 		if !isIdentifier(entry) {
 			continue
 		}
-		if _, ok := policies.Branches[entry]; !ok {
-			errs = append(errs, fmt.Sprintf("%s.when.branches: unknown policy %q (not in policies.branches)", path, entry))
+		if _, ok := matchers.Branches[entry]; !ok {
+			errs = append(errs, fmt.Sprintf("%s.when.branches: unknown matcher %q (not in matchers.branches)", path, entry))
 		}
 	}
 

@@ -9,9 +9,9 @@ import (
 // ResolveDetailLevel evaluates the security detail rules against the current
 // tag and branch to determine which detail level to use in release notes.
 // CLI override (if non-empty) takes precedence over all rules.
-// Policies is available for future condition resolution but currently rules use
+// Matchers is available for future condition resolution but currently rules use
 // direct regex patterns via Condition.
-func ResolveDetailLevel(cfg config.SecurityConfig, cliOverride string, policies config.PoliciesConfig) string {
+func ResolveDetailLevel(cfg config.SecurityConfig, cliOverride string, matchers config.MatchersConfig) string {
 	if cliOverride != "" {
 		return cliOverride
 	}

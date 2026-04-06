@@ -518,7 +518,7 @@ func RunReleaseCreate(req ReleaseCreateRequest) error {
 		// global filtering and break the search-path invariant.
 		tagPatternMap := tagSourceMap(req.Config.Versioning.TagSources)
 		// Check when conditions on the primary release target
-		if targetWhenMatches(*primaryRelease, currentTag, tagPatternMap, req.Config.Policies.Branches) {
+		if targetWhenMatches(*primaryRelease, currentTag, tagPatternMap, req.Config.Matchers.Branches) {
 			rollingTags := gitver.ResolveTags(primaryRelease.Aliases, versionInfo)
 			for _, rt := range rollingTags {
 				if rt == tag || rt == "" {
@@ -599,7 +599,7 @@ func RunReleaseCreate(req ReleaseCreateRequest) error {
 
 		// Path 1: Explicit target overrides.
 		for _, t := range remoteReleases {
-			if !targetWhenMatches(t, currentTag, remoteTagPatternMap, req.Config.Policies.Branches) {
+			if !targetWhenMatches(t, currentTag, remoteTagPatternMap, req.Config.Matchers.Branches) {
 				if req.Verbose {
 					fmt.Fprintf(os.Stderr, "skip sync: %s (when conditions not met)\n", t.ID)
 				}
@@ -697,7 +697,7 @@ func buildImageRowsFromConfig(cfg *config.Config, currentTag string, versionInfo
 	registryTagPatternMap := tagSourceMap(cfg.Versioning.TagSources)
 
 	for _, t := range pipeline.CollectTargetsByKind(cfg, "registry") {
-		if !targetWhenMatches(t, currentTag, registryTagPatternMap, cfg.Policies.Branches) {
+		if !targetWhenMatches(t, currentTag, registryTagPatternMap, cfg.Matchers.Branches) {
 			continue
 		}
 		resolved, resolveErr := config.ResolveRegistryForTarget(t, cfg.Registries, cfg.Vars)
