@@ -60,15 +60,13 @@ func (e *Engine) Generate(b Badge) string {
 	return e.renderSVG(b)
 }
 
-// ContrastColor returns a grayscale text color derived from the inverse luminance
-// of the given hex background. Light backgrounds produce dark text; dark backgrounds
-// produce light text. The result is a smooth sRGB grayscale (not binary).
+// ContrastColor returns a legible text color for the given hex background.
+// Light backgrounds (luminance > 0.5) get near-black text; dark backgrounds get white.
 func ContrastColor(hex string) string {
 	r, g, b, ok := parseHex(hex)
 	if !ok {
 		return "#fff"
 	}
-	// Linearise sRGB channels
 	lin := func(c float64) float64 {
 		c /= 255
 		if c <= 0.03928 {
@@ -76,18 +74,11 @@ func ContrastColor(hex string) string {
 		}
 		return math.Pow((c+0.055)/1.055, 2.4)
 	}
-	// WCAG relative luminance
 	L := 0.2126*lin(r) + 0.7152*lin(g) + 0.0722*lin(b)
-	// Invert and re-encode to sRGB gray
-	invL := 1.0 - L
-	var gray float64
-	if invL <= 0.0031308 {
-		gray = invL * 12.92
-	} else {
-		gray = 1.055*math.Pow(invL, 1.0/2.4) - 0.055
+	if L > 0.5 {
+		return "#111"
 	}
-	v := int(math.Round(gray * 255))
-	return fmt.Sprintf("#%02x%02x%02x", v, v, v)
+	return "#fff"
 }
 
 // parseHex parses a CSS hex color (#rgb, #rrggbb) into float64 components.
