@@ -20,7 +20,6 @@ import (
 	"github.com/PrPlanIT/StageFreight/src/config"
 	"github.com/PrPlanIT/StageFreight/src/dependency"
 	"github.com/PrPlanIT/StageFreight/src/forge"
-	"github.com/PrPlanIT/StageFreight/src/gitver"
 	"github.com/PrPlanIT/StageFreight/src/lint"
 	"github.com/PrPlanIT/StageFreight/src/lint/modules/freshness"
 	"github.com/PrPlanIT/StageFreight/src/output"

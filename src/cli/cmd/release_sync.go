@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/PrPlanIT/StageFreight/src/config"
 	"github.com/PrPlanIT/StageFreight/src/forge"
-	"github.com/PrPlanIT/StageFreight/src/gitver"
 	"github.com/PrPlanIT/StageFreight/src/output"
 )
 
@@ -131,11 +131,8 @@ func runReleaseSync(cmd *cobra.Command, args []string) error {
 			}
 			description := r.Description
 
-			// Resolve {var:...} templates in project_id for display.
-			projectID := gitver.ResolveVars(m.ProjectID, cfg.Vars)
-
 			if relSyncDryRun {
-				sec.Row("  %s %s → %s/%s (dry-run)", output.StatusIcon("success", color), r.TagName, m.Provider, projectID)
+				sec.Row("  %s %s → %s/%s (dry-run)", output.StatusIcon("success", color), r.TagName, m.Provider, m.Project)
 				totalCreated++
 				continue
 			}
@@ -151,7 +148,7 @@ func runReleaseSync(cmd *cobra.Command, args []string) error {
 				sec.Row("  %s %s — %v", output.StatusIcon("failed", color), r.TagName, createErr)
 				totalFailed++
 			} else {
-				sec.Row("  %s %s → %s/%s", output.StatusIcon("success", color), r.TagName, m.Provider, projectID)
+				sec.Row("  %s %s → %s/%s", output.StatusIcon("success", color), r.TagName, m.Provider, m.Project)
 				totalCreated++
 			}
 		}

@@ -91,7 +91,7 @@ func ResolveLinkBase(cfg *Config) (string, error) {
 		return "", nil
 	default:
 		return "", fmt.Errorf(
-			"sources.publish_origin: unknown kind %q (expected primary, mirror, or url)", po.Kind)
+			"publish_origin: unknown kind %q (expected repo or url)", cfg.PublishOrigin.Kind)
 	}
 }
 

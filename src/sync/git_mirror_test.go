@@ -58,13 +58,6 @@ func TestMirrorPush_Success(t *testing.T) {
 	source := setupTestRepo(t)
 	remote := setupBareRemote(t)
 
-	// Use file:// URL so no credentials needed
-	acc := config.MirrorConfig{
-		ID:       "test-remote",
-		Provider: "gitea",
-		URL:      "file://" + remote,
-	}
-
 	// Override buildAuthURL for test — use bare file path directly
 	result := mirrorPushDirect(t, source, remote)
 
@@ -74,7 +67,7 @@ func TestMirrorPush_Success(t *testing.T) {
 	if result.Degraded {
 		t.Error("should not be degraded on success")
 	}
-	if result.AccessoryID != acc.ID {
+	if result.AccessoryID != "test-remote" {
 		// This test uses mirrorPushDirect, not the full MirrorPush
 	}
 
@@ -239,22 +232,22 @@ func TestResolveGitAuth(t *testing.T) {
 }
 
 func TestBuildRemoteURL(t *testing.T) {
-	m := config.MirrorConfig{
-		URL:       "https://github.com",
-		ProjectID: "HomeLabHD/ansible",
+	r := config.ResolvedRepo{
+		BaseURL: "https://github.com",
+		Project: "example-org/example-repo",
 	}
-	got := buildRemoteURL(m)
-	if got != "https://github.com/HomeLabHD/ansible.git" {
-		t.Errorf("buildRemoteURL = %q, want https://github.com/HomeLabHD/ansible.git", got)
+	got := buildRemoteURL(r)
+	if got != "https://github.com/example-org/example-repo.git" {
+		t.Errorf("buildRemoteURL = %q, want https://github.com/example-org/example-repo.git", got)
 	}
 }
 
 func TestBuildRemoteURL_AlreadyHasGitSuffix(t *testing.T) {
-	m := config.MirrorConfig{
-		URL:       "https://github.com",
-		ProjectID: "HomeLabHD/ansible.git",
+	r := config.ResolvedRepo{
+		BaseURL: "https://github.com",
+		Project: "example-org/example-repo.git",
 	}
-	got := buildRemoteURL(m)
+	got := buildRemoteURL(r)
 	if strings.HasSuffix(got, ".git.git") {
 		t.Errorf("buildRemoteURL double-appended .git: %s", got)
 	}
