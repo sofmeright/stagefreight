@@ -41,14 +41,15 @@ func (e *Engine) renderSVG(b Badge) string {
 	s.WriteString(fmt.Sprintf(`<rect width="%d" height="20" fill="url(#b)"/>`, totalWidth))
 	s.WriteString(`</g>`)
 
-	// Text
+	// Text — label side is always on #555 (dark), value side adapts to badge color.
+	valueTextColor := ContrastColor(b.Color)
 	fontFamily := fmt.Sprintf("'%s',Verdana,Geneva,sans-serif", fontName)
 	s.WriteString(fmt.Sprintf(`<g fill="#fff" text-anchor="middle" font-family="%s" font-size="%g">`,
 		xmlEscape(fontFamily), fontSize))
 	s.WriteString(fmt.Sprintf(`<text x="%d" y="15" fill="#010101" fill-opacity=".3">%s</text>`, labelWidth/2, label))
 	s.WriteString(fmt.Sprintf(`<text x="%d" y="14">%s</text>`, labelWidth/2, label))
 	s.WriteString(fmt.Sprintf(`<text x="%d" y="15" fill="#010101" fill-opacity=".3">%s</text>`, labelWidth+valueWidth/2, value))
-	s.WriteString(fmt.Sprintf(`<text x="%d" y="14">%s</text>`, labelWidth+valueWidth/2, value))
+	s.WriteString(fmt.Sprintf(`<text x="%d" y="14" fill="%s">%s</text>`, labelWidth+valueWidth/2, valueTextColor, value))
 	s.WriteString(`</g>`)
 
 	s.WriteString(`</svg>`)

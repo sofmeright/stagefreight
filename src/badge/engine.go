@@ -1,6 +1,11 @@
 package badge
 
-import "fmt"
+import (
+	"fmt"
+	"math"
+	"strconv"
+	"strings"
+)
 
 // Engine generates SVG badges using a specific font.
 type Engine struct {
@@ -53,6 +58,56 @@ type Badge struct {
 // Generate produces a shields.io-compatible SVG badge string.
 func (e *Engine) Generate(b Badge) string {
 	return e.renderSVG(b)
+}
+
+// ContrastColor returns a grayscale text color derived from the inverse luminance
+// of the given hex background. Light backgrounds produce dark text; dark backgrounds
+// produce light text. The result is a smooth sRGB grayscale (not binary).
+func ContrastColor(hex string) string {
+	r, g, b, ok := parseHex(hex)
+	if !ok {
+		return "#fff"
+	}
+	// Linearise sRGB channels
+	lin := func(c float64) float64 {
+		c /= 255
+		if c <= 0.03928 {
+			return c / 12.92
+		}
+		return math.Pow((c+0.055)/1.055, 2.4)
+	}
+	// WCAG relative luminance
+	L := 0.2126*lin(r) + 0.7152*lin(g) + 0.0722*lin(b)
+	// Invert and re-encode to sRGB gray
+	invL := 1.0 - L
+	var gray float64
+	if invL <= 0.0031308 {
+		gray = invL * 12.92
+	} else {
+		gray = 1.055*math.Pow(invL, 1.0/2.4) - 0.055
+	}
+	v := int(math.Round(gray * 255))
+	return fmt.Sprintf("#%02x%02x%02x", v, v, v)
+}
+
+// parseHex parses a CSS hex color (#rgb, #rrggbb) into float64 components.
+func parseHex(hex string) (r, g, b float64, ok bool) {
+	hex = strings.TrimPrefix(hex, "#")
+	switch len(hex) {
+	case 3:
+		hex = string([]byte{hex[0], hex[0], hex[1], hex[1], hex[2], hex[2]})
+	case 6:
+		// ok
+	default:
+		return 0, 0, 0, false
+	}
+	ri, err1 := strconv.ParseInt(hex[0:2], 16, 32)
+	gi, err2 := strconv.ParseInt(hex[2:4], 16, 32)
+	bi, err3 := strconv.ParseInt(hex[4:6], 16, 32)
+	if err1 != nil || err2 != nil || err3 != nil {
+		return 0, 0, 0, false
+	}
+	return float64(ri), float64(gi), float64(bi), true
 }
 
 // StatusColor maps a status keyword to a badge hex color.
