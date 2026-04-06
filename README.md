@@ -122,7 +122,7 @@ See [CLI Reference](docs/reference/CLI.md) for full flag documentation.
 
 #### Runtime Packages
 <!-- sf:contents-apk:start -->
-![chafa](https://img.shields.io/badge/chafa-555?style=flat) ![docker-cli](https://img.shields.io/badge/docker--cli-555?style=flat) ![git](https://img.shields.io/badge/git-555?style=flat) ![tree](https://img.shields.io/badge/tree-555?style=flat)
+![chafa](https://img.shields.io/badge/chafa-555?style=flat) ![git](https://img.shields.io/badge/git-555?style=flat) ![tree](https://img.shields.io/badge/tree-555?style=flat)
 <!-- sf:contents-apk:end -->
 
 ### Looking for a minimal image?
