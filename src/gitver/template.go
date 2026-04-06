@@ -373,11 +373,16 @@ func resolveScopedVersions(s string, rootDir string) string {
 				break
 			}
 
-			// Resolve scoped version (cached)
+			// Resolve scoped version (cached).
+			// Scoped version resolution is its own tiny subsystem — it finds
+			// the latest git tag with a scope prefix ("component-v1.0.0") and
+			// strips the prefix. It does NOT participate in the branch
+			// versioning DAG; it's purely for resolving {field:scope}
+			// placeholders in tag/image templates.
 			sv, ok := cache[scope]
 			if !ok {
 				var err error
-				sv, err = DetectScopedVersion(rootDir, scope)
+				sv, err = detectScopedVersionForTemplate(rootDir, scope)
 				if err != nil {
 					sv = &VersionInfo{Version: "?", Base: "?", Major: "?", Minor: "?", Patch: "?"}
 				}
@@ -548,4 +553,67 @@ func sanitizeTag(s string) string {
 		" ", "-",
 	)
 	return r.Replace(s)
+}
+
+// detectScopedVersionForTemplate finds the latest git tag matching
+// SCOPE-v* or SCOPE-[0-9]* and parses it as semver. This is a local helper
+// for {field:scope} template placeholders — it intentionally does NOT go
+// through the branch versioning DAG because scoped versions are a separate
+// concern (multi-artifact repos where each component has its own version
+// line, independent of branch_builds).
+//
+// Returns a VersionInfo populated from the matched tag, or an error if no
+// tag matches or the matched tag is not parseable as semver.
+func detectScopedVersionForTemplate(rootDir string, scope string) (*VersionInfo, error) {
+	if scope == "" {
+		return nil, fmt.Errorf("scope is required")
+	}
+	matchArgs := []string{
+		"--match", scope + "-v*",
+		"--match", scope + "-[0-9]*",
+	}
+
+	v := &VersionInfo{}
+
+	sha, err := gitCmd(rootDir, "rev-parse", "--short=7", "HEAD")
+	if err != nil {
+		return nil, fmt.Errorf("getting HEAD SHA: %w", err)
+	}
+	v.SHA = sha
+
+	if branch, err := gitCmd(rootDir, "rev-parse", "--abbrev-ref", "HEAD"); err == nil {
+		v.Branch = branch
+	}
+
+	descArgs := append([]string{"describe", "--tags", "--abbrev=0"}, matchArgs...)
+	desc, err := gitCmd(rootDir, descArgs...)
+	if err != nil {
+		return nil, fmt.Errorf("no scoped tag found for %q: %w", scope, err)
+	}
+
+	tag := strings.TrimPrefix(strings.TrimSpace(desc), scope+"-")
+
+	m := semverRe.FindStringSubmatch(tag)
+	if m == nil {
+		return nil, fmt.Errorf("scoped tag %q is not parseable as semver", tag)
+	}
+	v.Major = m[1]
+	v.Minor = m[2]
+	v.Patch = m[3]
+	v.Base = fmt.Sprintf("%s.%s.%s", m[1], m[2], m[3])
+	if m[4] != "" {
+		v.Prerelease = m[4]
+		v.IsPrerelease = true
+		v.Version = fmt.Sprintf("%s-%s", v.Base, v.Prerelease)
+	} else {
+		v.Version = v.Base
+	}
+
+	// Check if HEAD is exactly at the scoped tag (clean release)
+	exactArgs := append([]string{"describe", "--tags", "--exact-match"}, matchArgs...)
+	if _, exactErr := gitCmd(rootDir, exactArgs...); exactErr == nil {
+		v.IsRelease = true
+	}
+
+	return v, nil
 }

@@ -177,7 +177,7 @@ func generateConfigBadgesImpl(eng *badge.Engine, appCfg *config.Config, rootDir 
 	}
 
 	// Detect version for template resolution
-	versionInfo, err := build.DetectVersion(rootDir)
+	versionInfo, err := build.DetectVersion(rootDir, appCfg)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "  warning: version detection failed: %v\n", err)
 	}

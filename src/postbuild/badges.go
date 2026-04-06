@@ -69,7 +69,7 @@ func RunBadgeSection(w io.Writer, color bool, rootDir string, appCfg *config.Con
 	items := CollectNarratorBadgeItems(appCfg)
 
 	// Detect version for template resolution
-	vi, _ := build.DetectVersion(rootDir)
+	vi, _ := build.DetectVersion(rootDir, appCfg)
 
 	// Pass 1: resolve version templates for all badges, collect resolved values
 	specs := make([]config.BadgeSpec, len(items))

@@ -40,7 +40,7 @@ Modes:
   stagefreight tag --major
   stagefreight tag               Interactive selection (TTY only)
 
-The tag is validated against policies.git_tags before creation.
+The tag is validated against versioning.tags before creation.
 Highlights are generated from the glossary pipeline or prompted
 when in interactive mode.`,
 	Args: cobra.MaximumNArgs(1),
@@ -116,10 +116,10 @@ func runTag(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Collect tag patterns from policies
+	// Collect tag patterns from versioning tag sources
 	var tagPatterns []string
-	for _, p := range cfg.Policies.GitTags {
-		tagPatterns = append(tagPatterns, p)
+	for _, ts := range cfg.Versioning.TagSources {
+		tagPatterns = append(tagPatterns, ts.Pattern)
 	}
 
 	// Resolve target
@@ -156,7 +156,7 @@ func runTag(cmd *cobra.Command, args []string) error {
 			}
 		}
 		if !matched {
-			return fmt.Errorf("tag %q does not match any release policy in policies.git_tags", plan.NextTag)
+			return fmt.Errorf("tag %q does not match any release tag pattern in versioning.tags", plan.NextTag)
 		}
 	}
 
@@ -294,8 +294,8 @@ type versionSelection struct {
 func interactiveVersionSelect(repoDir string) (*versionSelection, error) {
 	// Find previous tag for context
 	var tagPatterns []string
-	for _, p := range cfg.Policies.GitTags {
-		tagPatterns = append(tagPatterns, p)
+	for _, ts := range cfg.Versioning.TagSources {
+		tagPatterns = append(tagPatterns, ts.Pattern)
 	}
 	prev, _ := release.PreviousReleaseTag(repoDir, "HEAD", tagPatterns)
 

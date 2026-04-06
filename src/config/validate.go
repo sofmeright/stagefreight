@@ -18,13 +18,118 @@ func Validate(cfg *Config) (warnings []string, err error) {
 		errs = append(errs, fmt.Sprintf("version: must be 1, got %d", cfg.Version))
 	}
 
-	// ── Policies ──────────────────────────────────────────────────────────
+	// ── Versioning ───────────────────────────────────────────────────────
 
-	for name := range cfg.Policies.GitTags {
-		if !isIdentifier(name) {
-			errs = append(errs, fmt.Sprintf("policies.git_tags: key %q is not a valid identifier (must match [a-zA-Z][a-zA-Z0-9_.\\-]*)", name))
+	// tag_sources: unique ids, non-empty patterns, valid identifiers.
+	tagSourceIDs := make(map[string]bool, len(cfg.Versioning.TagSources))
+	for i, ts := range cfg.Versioning.TagSources {
+		tspath := fmt.Sprintf("versioning.tag_sources[%d]", i)
+		if ts.ID == "" {
+			errs = append(errs, fmt.Sprintf("%s: id is required", tspath))
+			continue
+		}
+		if !isIdentifier(ts.ID) {
+			errs = append(errs, fmt.Sprintf("%s: id %q is not a valid identifier (must match [a-zA-Z][a-zA-Z0-9_.\\-]*)", tspath, ts.ID))
+		}
+		if tagSourceIDs[ts.ID] {
+			errs = append(errs, fmt.Sprintf("%s: duplicate id %q", tspath, ts.ID))
+		}
+		tagSourceIDs[ts.ID] = true
+		if ts.Pattern == "" {
+			errs = append(errs, fmt.Sprintf("%s: pattern is required", tspath))
+		} else if _, rerr := regexp.Compile(ts.Pattern); rerr != nil {
+			errs = append(errs, fmt.Sprintf("%s: pattern %q is not a valid regex: %v", tspath, ts.Pattern, rerr))
 		}
 	}
+
+	// branch_builds: ordered slice validation.
+	// - id required, unique
+	// - default required and last
+	// - non-default requires match + match references a declared branch matcher
+	// - default forbids match
+	// - base_from non-empty, every id exists in tag_sources, no duplicates inside
+	// - format non-empty
+	// - two non-default entries must not share the same match
+	branchBuildIDs := make(map[string]bool, len(cfg.Versioning.BranchBuilds))
+	matchToRuleID := make(map[string]string) // match → branch_build id (for duplicate detection)
+	hasDefault := false
+	defaultIndex := -1
+	for i, bb := range cfg.Versioning.BranchBuilds {
+		bbpath := fmt.Sprintf("versioning.branch_builds[%d]", i)
+		if bb.ID == "" {
+			errs = append(errs, fmt.Sprintf("%s: id is required", bbpath))
+			continue
+		}
+		if branchBuildIDs[bb.ID] {
+			errs = append(errs, fmt.Sprintf("%s: duplicate id %q", bbpath, bb.ID))
+		}
+		branchBuildIDs[bb.ID] = true
+
+		if bb.ID == "default" {
+			hasDefault = true
+			defaultIndex = i
+			if bb.Match != "" {
+				errs = append(errs, fmt.Sprintf("%s: default entry must not have match (default catches unmatched branches)", bbpath))
+			}
+		} else {
+			if bb.Match == "" {
+				errs = append(errs, fmt.Sprintf("%s: match is required for non-default entries", bbpath))
+			} else if _, ok := cfg.Policies.Branches[bb.Match]; !ok {
+				errs = append(errs, fmt.Sprintf("%s: match %q not found in policies.branches", bbpath, bb.Match))
+			} else {
+				// duplicate-match detection: two non-default rules must not share the same match
+				if prev, seen := matchToRuleID[bb.Match]; seen {
+					errs = append(errs, fmt.Sprintf("%s: match %q is already used by branch_build %q (1:1 mapping required; first match wins creates implicit priority otherwise)", bbpath, bb.Match, prev))
+				} else {
+					matchToRuleID[bb.Match] = bb.ID
+				}
+			}
+		}
+
+		if len(bb.BaseFrom) == 0 {
+			errs = append(errs, fmt.Sprintf("%s: base_from is required (non-empty list of tag_sources ids)", bbpath))
+		} else {
+			seen := make(map[string]bool, len(bb.BaseFrom))
+			for _, id := range bb.BaseFrom {
+				if seen[id] {
+					errs = append(errs, fmt.Sprintf("%s: duplicate base_from entry %q", bbpath, id))
+				}
+				seen[id] = true
+				if !tagSourceIDs[id] {
+					errs = append(errs, fmt.Sprintf("%s: base_from id %q not found in versioning.tag_sources", bbpath, id))
+				}
+			}
+		}
+
+		if bb.Format == "" {
+			errs = append(errs, fmt.Sprintf("%s: format is required", bbpath))
+		}
+	}
+
+	if len(cfg.Versioning.BranchBuilds) > 0 {
+		if !hasDefault {
+			errs = append(errs, "versioning.branch_builds: an entry with id 'default' is required (catch-all for unmatched branches)")
+		} else if defaultIndex != len(cfg.Versioning.BranchBuilds)-1 {
+			errs = append(errs, fmt.Sprintf("versioning.branch_builds: default entry must be last (found at index %d of %d)", defaultIndex, len(cfg.Versioning.BranchBuilds)))
+		}
+	}
+
+	switch cfg.Versioning.NoLineage.Mode {
+	case "", "error":
+		// valid
+	case "explicit":
+		v := cfg.Versioning.NoLineage.Version
+		if v == "" {
+			errs = append(errs, "versioning.no_lineage: mode explicit requires version template")
+		} else if !strings.Contains(v, "{sha}") && !strings.Contains(v, "{time}") {
+			errs = append(errs, "versioning.no_lineage: version must contain {sha} or {time} (hardcoded versions are dishonest)")
+		}
+	default:
+		errs = append(errs, fmt.Sprintf("versioning.no_lineage: unknown mode %q (expected error or explicit)", cfg.Versioning.NoLineage.Mode))
+	}
+
+	// ── Policies (branches only — git_tags moved to versioning.tags) ─────
+
 	for name := range cfg.Policies.Branches {
 		if !isIdentifier(name) {
 			errs = append(errs, fmt.Sprintf("policies.branches: key %q is not a valid identifier (must match [a-zA-Z][a-zA-Z0-9_.\\-]*)", name))
@@ -146,7 +251,7 @@ func Validate(cfg *Config) (warnings []string, err error) {
 		errs = append(errs, terrs...)
 
 		// When block validation
-		werrs := validateWhen(t.When, tpath, cfg.Policies)
+		werrs := validateWhen(t.When, tpath, cfg.Versioning, cfg.Policies)
 		errs = append(errs, werrs...)
 	}
 
@@ -361,6 +466,34 @@ func Validate(cfg *Config) (warnings []string, err error) {
 		errs = append(errs, ValidateTargetRegistryRefs(cfg.Targets, cfg.Registries)...)
 	}
 
+	// ── Unused matcher warning (high signal, low cost) ──────────────────
+	//
+	// Cross-check declared branch matchers against references. If a matcher
+	// is defined but unused, it's almost always a typo or leftover cruft.
+	// Warn, don't block — just diagnostic.
+	if len(cfg.Policies.Branches) > 0 {
+		referenced := make(map[string]bool)
+		for _, bb := range cfg.Versioning.BranchBuilds {
+			if bb.Match != "" {
+				referenced[bb.Match] = true
+			}
+		}
+		for _, t := range cfg.Targets {
+			for _, b := range t.When.Branches {
+				if !strings.HasPrefix(b, "re:") && isIdentifier(b) {
+					referenced[b] = true
+				}
+			}
+		}
+		for name := range cfg.Policies.Branches {
+			if !referenced[name] {
+				warnings = append(warnings, fmt.Sprintf(
+					"matcher %q is defined but not referenced by any branch_build or target.when.branches",
+					name))
+			}
+		}
+	}
+
 	if len(errs) > 0 {
 		return warnings, fmt.Errorf("%s", strings.Join(errs, "; "))
 	}
@@ -480,19 +613,24 @@ func validateTarget(t TargetConfig, path string, buildIDs map[string]bool, polic
 	return errs
 }
 
-// validateWhen checks the when block for valid policy references and events.
-func validateWhen(w TargetCondition, path string, policies PoliciesConfig) []string {
+// validateWhen checks the when block for valid pattern references and events.
+func validateWhen(w TargetCondition, path string, versioning VersioningConfig, policies PoliciesConfig) []string {
 	var errs []string
 
+	// Build tag source id set for when.git_tags reference validation.
+	tagSourceIDs := make(map[string]bool, len(versioning.TagSources))
+	for _, ts := range versioning.TagSources {
+		tagSourceIDs[ts.ID] = true
+	}
 	for _, entry := range w.GitTags {
 		if strings.HasPrefix(entry, "re:") {
-			continue // inline regex, skip policy lookup
+			continue // inline regex, skip pattern lookup
 		}
 		if !isIdentifier(entry) {
-			continue // not a policy name, will be treated as regex by match logic
+			continue // not a pattern name, will be treated as regex by match logic
 		}
-		if _, ok := policies.GitTags[entry]; !ok {
-			errs = append(errs, fmt.Sprintf("%s.when.git_tags: unknown policy %q (not in policies.git_tags)", path, entry))
+		if !tagSourceIDs[entry] {
+			errs = append(errs, fmt.Sprintf("%s.when.git_tags: unknown tag source %q (not in versioning.tag_sources)", path, entry))
 		}
 	}
 

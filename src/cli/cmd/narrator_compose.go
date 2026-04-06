@@ -73,7 +73,7 @@ func runNarratorCompose(cmd *cobra.Command, args []string) error {
 
 	// Detect version for template resolution.
 	var vi *gitver.VersionInfo
-	vi, err = build.DetectVersion(rootDir)
+	vi, err = build.DetectVersion(rootDir, cfg)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "  warning: version detection failed: %v\n", err)
 	}

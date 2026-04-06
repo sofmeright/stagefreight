@@ -212,7 +212,7 @@ func runCrucibleMode(req Request) error {
 	// We compute cacheTo here and inject it on the publish pass when Push is restored.
 	var publishCacheTo []build.CacheRef
 	if req.Config.BuildCache.IsActive() {
-		versionInfo, _ := build.DetectVersion(rootDir)
+		versionInfo, _ := build.DetectVersion(rootDir, req.Config)
 		cacheRepoID := resolveRepoIDFromContext(pc)
 		cacheBranch := ""
 		if versionInfo != nil {

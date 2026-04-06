@@ -157,7 +157,7 @@ func RunReleaseCreate(req ReleaseCreateRequest) error {
 	color := output.UseColor()
 
 	// Detect version for tag
-	versionInfo, err := build.DetectVersion(rootDir)
+	versionInfo, err := build.DetectVersion(rootDir, req.Config)
 	if err != nil {
 		return fmt.Errorf("detecting version: %w", err)
 	}
@@ -367,10 +367,10 @@ func RunReleaseCreate(req ReleaseCreateRequest) error {
 		if len(sha) > 8 {
 			sha = sha[:8]
 		}
-		// Collect release tag patterns from policies
+		// Collect release tag patterns from versioning tag sources
 		var tagPatterns []string
-		for _, p := range req.Config.Policies.GitTags {
-			tagPatterns = append(tagPatterns, p)
+		for _, ts := range req.Config.Versioning.TagSources {
+			tagPatterns = append(tagPatterns, ts.Pattern)
 		}
 
 		input := release.NotesInput{
@@ -512,8 +512,13 @@ func RunReleaseCreate(req ReleaseCreateRequest) error {
 	// These are lightweight git tags (not releases) — they point at the release tag.
 	if primaryRelease != nil && len(primaryRelease.Aliases) > 0 {
 		currentTag := os.Getenv("CI_COMMIT_TAG")
+		// CRITICAL:
+		// tag_sources as map is ONLY for when.git_tags lookup on target conditions.
+		// DO NOT reuse this for version selection — that would reintroduce
+		// global filtering and break the search-path invariant.
+		tagPatternMap := tagSourceMap(req.Config.Versioning.TagSources)
 		// Check when conditions on the primary release target
-		if targetWhenMatches(*primaryRelease, currentTag, req.Config.Policies) {
+		if targetWhenMatches(*primaryRelease, currentTag, tagPatternMap, req.Config.Policies.Branches) {
 			rollingTags := gitver.ResolveTags(primaryRelease.Aliases, versionInfo)
 			for _, rt := range rollingTags {
 				if rt == tag || rt == "" {
@@ -586,9 +591,15 @@ func RunReleaseCreate(req ReleaseCreateRequest) error {
 			}
 		}
 
+		// CRITICAL:
+		// tag_sources as map is ONLY for when.git_tags lookup on target conditions.
+		// DO NOT reuse this for version selection — that would reintroduce
+		// global filtering and break the search-path invariant.
+		remoteTagPatternMap := tagSourceMap(req.Config.Versioning.TagSources)
+
 		// Path 1: Explicit target overrides.
 		for _, t := range remoteReleases {
-			if !targetWhenMatches(t, currentTag, req.Config.Policies) {
+			if !targetWhenMatches(t, currentTag, remoteTagPatternMap, req.Config.Policies.Branches) {
 				if req.Verbose {
 					fmt.Fprintf(os.Stderr, "skip sync: %s (when conditions not met)\n", t.ID)
 				}
@@ -679,8 +690,14 @@ func buildImageRowsFromConfig(cfg *config.Config, currentTag string, versionInfo
 	targetIndex := make(map[imageKey]*pendingTarget)
 	var targetOrder []imageKey
 
+	// CRITICAL:
+	// tag_sources as map is ONLY for when.git_tags lookup on target conditions.
+	// DO NOT reuse this for version selection — that would reintroduce
+	// global filtering and break the search-path invariant.
+	registryTagPatternMap := tagSourceMap(cfg.Versioning.TagSources)
+
 	for _, t := range pipeline.CollectTargetsByKind(cfg, "registry") {
-		if !targetWhenMatches(t, currentTag, cfg.Policies) {
+		if !targetWhenMatches(t, currentTag, registryTagPatternMap, cfg.Policies.Branches) {
 			continue
 		}
 		resolved, resolveErr := config.ResolveRegistryForTarget(t, cfg.Registries, cfg.Vars)
@@ -774,16 +791,16 @@ func findRemoteReleaseTargets(cfg *config.Config) []config.TargetConfig {
 
 // targetWhenMatches checks if a target's when conditions match the current CI environment.
 // Resolves policy names from the provided policies config.
-func targetWhenMatches(t config.TargetConfig, currentTag string, policies config.PoliciesConfig) bool {
+func targetWhenMatches(t config.TargetConfig, currentTag string, tagPatterns map[string]string, branchPatterns map[string]string) bool {
 	if len(t.When.GitTags) > 0 && currentTag != "" {
-		resolved := resolveWhenPatternsFromCfg(t.When.GitTags, policies.GitTags)
+		resolved := resolveWhenPatternsFromCfg(t.When.GitTags, tagPatterns)
 		if !config.MatchPatterns(resolved, currentTag) {
 			return false
 		}
 	}
 	if len(t.When.Branches) > 0 {
 		branch := resolveBranchFromEnv()
-		resolved := resolveWhenPatternsFromCfg(t.When.Branches, policies.Branches)
+		resolved := resolveWhenPatternsFromCfg(t.When.Branches, branchPatterns)
 		if !config.MatchPatterns(resolved, branch) {
 			return false
 		}

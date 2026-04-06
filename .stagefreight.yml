@@ -1,11 +1,34 @@
 version: 1
 
+policies:
+  branches:
+    main: "^main$"
+
 vars:
   org: prplanit
   github_org: PrPlanIT
   gitlab_group: PrPlanIT
   repo: stagefreight
   github_repo: StageFreight
+
+versioning:
+  tag_sources:
+    - id: stable
+      pattern: "^v?\\d+\\.\\d+\\.\\d+$"
+    - id: prerelease
+      pattern: "^v?\\d+\\.\\d+\\.\\d+-.+"
+  branch_builds:
+    - id: default
+      base_from: [stable]
+      format: "{base}-dev+{sha}"
+  no_lineage:
+    mode: error
+
+builds:
+  - id: stagefreight
+    kind: docker
+    build_mode: crucible
+    platforms: [linux/amd64]
 
 forges:
   - id: gitlab
@@ -46,27 +69,6 @@ registries:
     url: cr.pcfae.com
     credentials: HARBOR
     default_path: "{var:org}/{var:repo}"
-
-policies:
-  git_tags:
-    stable: "^v?\\d+\\.\\d+\\.\\d+$"
-    prerelease: "^v?\\d+\\.\\d+\\.\\d+-.+"
-  branches:
-    main: "^main$"
-
-builds:
-  - id: stagefreight
-    kind: docker
-    build_mode: crucible
-    platforms: [linux/amd64]
-
-
-build_cache:
-  mode: hybrid
-  external:
-    target: harbor-dev
-    path: "cache"
-    fallback: "main"
 
 targets:
   # ── Docker Hub: stable releases ─────────────────────────────────
@@ -132,6 +134,103 @@ targets:
     kind: release
     aliases: ["v{version}", "latest"]
     when: { git_tags: [stable], events: [tag] }
+
+build_cache:
+  mode: hybrid
+  external:
+    target: harbor-dev
+    path: "cache"
+    fallback: "main"
+
+commit:
+  default_type: docs
+  conventional: true
+  backend: git
+
+dependency:
+  enabled: true
+  output: ".stagefreight/deps"
+  scope:
+    go_modules: true
+    dockerfile_env: true
+  commit:
+    enabled: true
+    type: chore
+    message: "update managed dependencies"
+    push: true
+    skip_ci: false
+
+docs:
+  enabled: true
+  generators:
+    badges: true
+    reference_docs: true
+    narrator: true
+    docker_readme: true
+  commit:
+    enabled: true
+    type: docs
+    message: "refresh generated docs and badges"
+    add:
+      - "README.md"
+      - "docs/modules"
+      - "docs/reference"
+      - "docs/Component.md"
+      - ".stagefreight/badges"
+    push: true
+    skip_ci: false
+
+lint:
+  level: full
+  exclude:
+    - "*.ttf"
+    - "*.png"
+    - "*.jpg"
+    - "*.ico"
+    - "*.woff"
+    - "*.woff2"
+  modules:
+    freshness:
+      enabled: true
+      options:
+        cache_ttl: 300
+        sources:
+          docker_images: true
+          github_releases: true
+          go_modules: true
+        vulnerability:
+          enabled: true
+    tabs:
+      enabled: true
+    secrets:
+      enabled: true
+      exclude:
+        - "go.sum"
+    conflicts:
+      enabled: true
+    filesize:
+      enabled: true
+    unicode:
+      enabled: true
+      options:
+        # Unicode / invisible text defense — see docs/Linter.md § Unicode
+        # No allowlist needed: banner art is build-generated with escaped
+        # string literals (no raw control bytes in source).
+        detect_bidi: true
+        detect_zero_width: true
+        detect_control_ascii: true
+
+release:
+  enabled: true
+  security_summary: ".stagefreight/security"
+  registry_links: true
+  catalog_links: true
+
+security:
+  enabled: true
+  output: ".stagefreight/security"
+  sbom: true
+  release_detail: full
 
 badges:
   items:
@@ -445,93 +544,3 @@ narrator:
         placement:
           between: ["<!-- sf:config-reference:start -->", "<!-- sf:config-reference:end -->"]
           mode: replace
-
-commit:
-  default_type: docs
-  conventional: true
-  backend: git
-
-lint:
-  level: full
-  exclude:
-    - "*.ttf"
-    - "*.png"
-    - "*.jpg"
-    - "*.ico"
-    - "*.woff"
-    - "*.woff2"
-  modules:
-    freshness:
-      enabled: true
-      options:
-        cache_ttl: 300
-        sources:
-          docker_images: true
-          github_releases: true
-          go_modules: true
-        vulnerability:
-          enabled: true
-    tabs:
-      enabled: true
-    secrets:
-      enabled: true
-      exclude:
-        - "go.sum"
-    conflicts:
-      enabled: true
-    filesize:
-      enabled: true
-    unicode:
-      enabled: true
-      options:
-        # Unicode / invisible text defense — see docs/Linter.md § Unicode
-        # No allowlist needed: banner art is build-generated with escaped
-        # string literals (no raw control bytes in source).
-        detect_bidi: true
-        detect_zero_width: true
-        detect_control_ascii: true
-
-security:
-  enabled: true
-  output: ".stagefreight/security"
-  sbom: true
-  release_detail: full
-
-dependency:
-  enabled: true
-  output: ".stagefreight/deps"
-  scope:
-    go_modules: true
-    dockerfile_env: true
-  commit:
-    enabled: true
-    type: chore
-    message: "update managed dependencies"
-    push: true
-    skip_ci: false
-
-docs:
-  enabled: true
-  generators:
-    badges: true
-    reference_docs: true
-    narrator: true
-    docker_readme: true
-  commit:
-    enabled: true
-    type: docs
-    message: "refresh generated docs and badges"
-    add:
-      - "README.md"
-      - "docs/modules"
-      - "docs/reference"
-      - "docs/Component.md"
-      - ".stagefreight/badges"
-    push: true
-    skip_ci: false
-
-release:
-  enabled: true
-  security_summary: ".stagefreight/security"
-  registry_links: true
-  catalog_links: true

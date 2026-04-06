@@ -35,7 +35,12 @@ type Config struct {
 	// Registries declares OCI registry hosts. Referenced by targets.
 	Registries []RegistryConfig `yaml:"registries,omitempty"`
 
-	// Policies defines named regex patterns for git tag and branch matching.
+	// Versioning controls how version identity is derived from git state.
+	Versioning VersioningConfig `yaml:"versioning"`
+
+	// Policies defines named regex patterns for branch matching.
+	// git_tags moved to versioning.tags — policies retains only branches
+	// until Phase 4 migrates them to matchers.
 	Policies PoliciesConfig `yaml:"policies"`
 
 	// Builds defines named build artifacts.
@@ -154,6 +159,7 @@ func defaults() *Config {
 	return &Config{
 		Version:    1,
 		Vars:       map[string]string{},
+		Versioning: DefaultVersioningConfig(),
 		Policies:   DefaultPoliciesConfig(),
 		Lint:       DefaultLintConfig(),
 		Security:   DefaultSecurityConfig(),

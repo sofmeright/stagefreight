@@ -36,7 +36,7 @@ func (e *imageEngine) Plan(ctx context.Context, cfgRaw interface{}, det *build.D
 	plan := &build.BuildPlan{}
 
 	// Resolve version for templates (tags, paths, URLs)
-	versionInfo, _ := build.DetectVersion(det.RootDir)
+	versionInfo, _ := build.DetectVersion(det.RootDir, cfg)
 	if versionInfo == nil {
 		versionInfo = &build.VersionInfo{
 			Version: "dev",
@@ -128,13 +128,22 @@ func planDockerBuild(b config.BuildConfig, cfg *config.Config, det *build.Detect
 	var tags []string
 	var registries []build.RegistryTarget
 
+	// CRITICAL:
+	// tag_sources as map is ONLY for when.git_tags lookup on target conditions.
+	// DO NOT reuse this for version selection — that would reintroduce
+	// global filtering and break the search-path invariant.
+	tagPatternMap := make(map[string]string, len(cfg.Versioning.TagSources))
+	for _, ts := range cfg.Versioning.TagSources {
+		tagPatternMap[ts.ID] = ts.Pattern
+	}
+
 	for i, t := range cfg.Targets {
 		if t.Kind != "registry" || t.Build != b.ID {
 			continue
 		}
 
 		// Check when conditions
-		if !targetAllowed(t, currentBranch, currentGitTag, cfg.Policies) {
+		if !targetAllowed(t, currentBranch, currentGitTag, tagPatternMap, cfg.Policies.Branches) {
 			continue
 		}
 
@@ -222,19 +231,19 @@ func planDockerBuild(b config.BuildConfig, cfg *config.Config, det *build.Detect
 }
 
 // targetAllowed checks if the current branch and git tag permit executing a target.
-// Uses policy-aware pattern matching for when.branches and when.git_tags.
-func targetAllowed(t config.TargetConfig, branch, gitTag string, policies config.PoliciesConfig) bool {
-	// Resolve when.branches patterns against policies
+// Uses pattern matching for when.branches and when.git_tags.
+func targetAllowed(t config.TargetConfig, branch, gitTag string, tagPatterns, branchPatterns map[string]string) bool {
+	// Resolve when.branches patterns
 	if len(t.When.Branches) > 0 {
-		resolved := resolveWhenPatterns(t.When.Branches, policies.Branches)
+		resolved := resolveWhenPatterns(t.When.Branches, branchPatterns)
 		if !config.MatchPatterns(resolved, branch) {
 			return false
 		}
 	}
 
-	// Resolve when.git_tags patterns against policies
+	// Resolve when.git_tags patterns against versioning.tags
 	if len(t.When.GitTags) > 0 {
-		resolved := resolveWhenPatterns(t.When.GitTags, policies.GitTags)
+		resolved := resolveWhenPatterns(t.When.GitTags, tagPatterns)
 		if gitTag == "" || !config.MatchPatterns(resolved, gitTag) {
 			return false
 		}

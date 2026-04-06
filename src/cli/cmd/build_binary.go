@@ -134,7 +134,7 @@ func binaryDetectPhase() pipeline.Phase {
 			}
 			pc.Scratch["binary.det"] = det
 
-			versionInfo, _ := build.DetectVersion(pc.RootDir)
+			versionInfo, _ := build.DetectVersion(pc.RootDir, pc.Config)
 			if versionInfo == nil {
 				versionInfo = &gitver.VersionInfo{
 					Version: "dev",

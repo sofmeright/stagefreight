@@ -54,7 +54,7 @@ func resolveWorkspace(ciCtx *ci.CIContext) string {
 // Binary builds execute before docker builds to satisfy depends_on ordering.
 func buildRunner(ctx context.Context, appCfg *config.Config, ciCtx *ci.CIContext, opts ci.RunOptions) error {
 	// Policy gate: skip non-release tags (e.g., rolling "latest" tag)
-	if ciCtx.IsTag() && !tagMatchesReleasePolicy(ciCtx.Tag, appCfg.Policies) {
+	if ciCtx.IsTag() && !tagMatchesReleasePolicy(ciCtx.Tag, appCfg.Versioning) {
 		fmt.Printf("  build: skipping — tag %q does not match any release policy\n", ciCtx.Tag)
 		return nil
 	}
@@ -454,7 +454,7 @@ func runDependencyUpdateLogic(ctx context.Context, appCfg *config.Config, rootDi
 // ── security runner ──────────────────────────────────────────────────────────
 func securityRunner(ctx context.Context, appCfg *config.Config, ciCtx *ci.CIContext, opts ci.RunOptions) error {
 	// Policy gate: skip non-release tags
-	if ciCtx.IsTag() && !tagMatchesReleasePolicy(ciCtx.Tag, appCfg.Policies) {
+	if ciCtx.IsTag() && !tagMatchesReleasePolicy(ciCtx.Tag, appCfg.Versioning) {
 		fmt.Printf("  security: skipping — tag %q does not match any release policy\n", ciCtx.Tag)
 		return nil
 	}
@@ -541,7 +541,7 @@ func securityRunner(ctx context.Context, appCfg *config.Config, ciCtx *ci.CICont
 // ── docs runner ──────────────────────────────────────────────────────────────
 func docsRunner(ctx context.Context, appCfg *config.Config, ciCtx *ci.CIContext, opts ci.RunOptions) error {
 	// Policy gate: skip non-release tags
-	if ciCtx.IsTag() && !tagMatchesReleasePolicy(ciCtx.Tag, appCfg.Policies) {
+	if ciCtx.IsTag() && !tagMatchesReleasePolicy(ciCtx.Tag, appCfg.Versioning) {
 		fmt.Printf("  docs: skipping — tag %q does not match any release policy\n", ciCtx.Tag)
 		return nil
 	}
@@ -855,13 +855,24 @@ func releaseTagMatchesAnyTarget(appCfg *config.Config, tag string) bool {
 		return true // no release targets configured
 	}
 
+	// CRITICAL:
+	// This map is ONLY for when.git_tags lookup on target conditions.
+	//
+	// versioning.tag_sources MUST remain an ORDERED SEARCH PATH for version
+	// resolution. DO NOT reuse this map for version selection. Doing so
+	// reintroduces global filtering and breaks the search-path invariant.
+	//
+	// If you find yourself thinking "I can share this map with gitver", stop
+	// and re-read the INVARIANT comment at the top of gitver.DetectVersionWithOpts.
+	tagPatternMap := tagSourceMap(appCfg.Versioning.TagSources)
+
 	hasConstraints := false
 	for _, t := range releaseTargets {
 		if len(t.When.GitTags) == 0 && len(t.When.Branches) == 0 {
 			continue
 		}
 		hasConstraints = true
-		if targetWhenMatches(t, tag, appCfg.Policies) {
+		if targetWhenMatches(t, tag, tagPatternMap, appCfg.Policies.Branches) {
 			return true
 		}
 	}
@@ -875,12 +886,25 @@ func releaseTagMatchesAnyTarget(appCfg *config.Config, tag string) bool {
 //
 // The skeleton defines generic CI event classes; StageFreight enforces
 // repo-specific tag eligibility at runtime from .stagefreight.yml policy.
-func tagMatchesReleasePolicy(tag string, policies config.PoliciesConfig) bool {
-	if len(policies.GitTags) == 0 {
-		return true // no policies = all tags are eligible (backward compat)
+// tagSourceMap flattens a tag_sources slice into an id → pattern map for
+// use at when.git_tags lookup boundaries. This is the ONLY place in the
+// codebase where tag_sources is converted to a map. It must stay scoped
+// to target condition resolution — NEVER reuse this for version selection
+// (that would reintroduce global filtering).
+func tagSourceMap(sources []config.TagSourceConfig) map[string]string {
+	m := make(map[string]string, len(sources))
+	for _, ts := range sources {
+		m[ts.ID] = ts.Pattern
 	}
-	for _, pattern := range policies.GitTags {
-		if config.MatchPatterns([]string{pattern}, tag) {
+	return m
+}
+
+func tagMatchesReleasePolicy(tag string, versioning config.VersioningConfig) bool {
+	if len(versioning.TagSources) == 0 {
+		return true // no tag sources = all tags are eligible
+	}
+	for _, ts := range versioning.TagSources {
+		if config.MatchPatterns([]string{ts.Pattern}, tag) {
 			return true
 		}
 	}

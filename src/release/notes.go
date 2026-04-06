@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/PrPlanIT/StageFreight/src/build"
+	"github.com/PrPlanIT/StageFreight/src/config"
 	"github.com/PrPlanIT/StageFreight/src/gitver"
 )
 
@@ -83,19 +84,20 @@ type BinaryRow struct {
 
 // NotesInput holds all data needed to render release notes.
 type NotesInput struct {
-	RepoDir      string   // git repository directory
-	FromRef      string   // start ref (empty = auto-detect previous tag)
-	ToRef        string   // end ref (default: HEAD)
-	TagPatterns  []string // regex patterns for release tags (from policies.git_tags)
-	SecurityTile string   // one-line status (e.g., "🛡️ ✅ **Passed** — no vulnerabilities")
-	SecurityBody string   // full section: status line + optional <details> CVE block
-	TagMessage   string   // annotated tag message (optional, auto-detected if empty)
-	ProjectName  string   // project name (auto-detected if empty)
-	Version      string   // version string (auto-detected if empty)
-	SHA          string   // short commit hash (auto-detected if empty)
-	IsPrerelease bool     // true if version has prerelease suffix
-	Images       []ImageRow  // resolved registry image rows for availability table
-	Downloads    []BinaryRow // binary/archive artifacts for downloads table
+	RepoDir      string         // git repository directory
+	FromRef      string         // start ref (empty = auto-detect previous tag)
+	ToRef        string         // end ref (default: HEAD)
+	TagPatterns  []string       // regex patterns for release tags (from versioning.tag_sources)
+	Config       *config.Config // config for auto-detect version (nil = skip auto-detect)
+	SecurityTile string         // one-line status (e.g., "🛡️ ✅ **Passed** — no vulnerabilities")
+	SecurityBody string         // full section: status line + optional <details> CVE block
+	TagMessage   string         // annotated tag message (optional, auto-detected if empty)
+	ProjectName  string         // project name (auto-detected if empty)
+	Version      string         // version string (auto-detected if empty)
+	SHA          string         // short commit hash (auto-detected if empty)
+	IsPrerelease bool           // true if version has prerelease suffix
+	Images       []ImageRow     // resolved registry image rows for availability table
+	Downloads    []BinaryRow    // binary/archive artifacts for downloads table
 }
 
 // GenerateNotes produces markdown release notes from git log between two refs.
@@ -114,9 +116,11 @@ func GenerateNotes(input NotesInput) (string, error) {
 		}
 	}
 
-	// Auto-detect project metadata if not provided
-	if input.ProjectName == "" || input.Version == "" || input.SHA == "" {
-		if vi, err := build.DetectVersion(input.RepoDir); err == nil {
+	// Auto-detect project metadata if not provided.
+	// Requires input.Config — without it, auto-detect is skipped and the
+	// caller is responsible for supplying Version/SHA directly.
+	if (input.ProjectName == "" || input.Version == "" || input.SHA == "") && input.Config != nil {
+		if vi, err := build.DetectVersion(input.RepoDir, input.Config); err == nil {
 			if input.Version == "" {
 				input.Version = vi.Version
 			}

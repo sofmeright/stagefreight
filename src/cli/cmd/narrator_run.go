@@ -58,7 +58,7 @@ func RunNarrator(appCfg *config.Config, rootDir string, dryRun bool, isVerbose b
 	}
 
 	// Detect version for template resolution.
-	versionInfo, err := build.DetectVersion(rootDir)
+	versionInfo, err := build.DetectVersion(rootDir, appCfg)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "  warning: version detection failed: %v\n", err)
 	}
