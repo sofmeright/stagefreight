@@ -10,6 +10,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/PrPlanIT/StageFreight/src/diag"
 )
 
 // VersionInfo holds resolved version metadata from git.
@@ -53,6 +55,12 @@ type VersioningOpts struct {
 type TagSource struct {
 	ID      string // e.g. "stable", "prerelease"
 	Pattern string // regex string — compiled once at detectVersion setup
+
+	// StripPrefix, if non-empty, is removed from a matched tag before semver
+	// parsing. Used for scope-prefixed tag lines like "component-v1.0.0",
+	// where the pattern matches the full tag but semver parsing needs the
+	// suffix. Optional — empty means no transform.
+	StripPrefix string
 }
 
 // BranchRule selects a version for a matched branch.
@@ -61,8 +69,9 @@ type TagSource struct {
 // precompiled regex and scans tags in git's order. First match wins, then
 // advance to next id if zero matches. See detectVersion for the full pipeline.
 type BranchRule struct {
-	ID          string         // entry id for errors; "default" is the catch-all
-	Match       *regexp.Regexp // nil when ID=="default"; compiled at opts-build time
+	ID          string         // entry id for errors and diagnostics
+	IsDefault   bool           // true when this is the catch-all fallback rule
+	Match       *regexp.Regexp // nil when IsDefault; compiled at opts-build time
 	BaseFromIDs []string       // ordered fallback chain; required (len >= 1)
 	Format      string         // version template: {base} {sha} {branch}
 }
@@ -182,8 +191,10 @@ func DetectVersionWithOpts(rootDir string, opts *VersioningOpts) (*VersionInfo, 
 	}
 
 	// Walk the search path: for each source in rule.BaseFromIDs, scan tags.
-	// First match wins.
-	chosenTag, err := walkBaseFromSearchPath(tags, rule, sourceRes)
+	// First match wins. We also receive the id of the matching source so
+	// we can apply any per-source transform (e.g. StripPrefix for scope-
+	// prefixed tag lines).
+	chosenTag, chosenSourceID, err := walkBaseFromSearchPath(tags, rule, sourceRes)
 	if err != nil {
 		return nil, err
 	}
@@ -193,17 +204,33 @@ func DetectVersionWithOpts(rootDir string, opts *VersioningOpts) (*VersionInfo, 
 		return applyNoLineage(v, opts)
 	}
 
-	// Determine if HEAD is exactly at the chosen tag.
+	// Determine if HEAD is exactly at the chosen tag. Uses the FULL tag
+	// (including any prefix) because git's reference is the untransformed
+	// name.
 	if headAtTag(rootDir, chosenTag) {
 		v.IsRelease = true
 	}
 
+	// Apply the per-source StripPrefix transform, if any, before semver
+	// parsing. This is how scope-prefixed tag lines ("component-v1.2.3")
+	// flow through the same populateSemver path as plain "v1.2.3" tags
+	// without gitver needing to know anything about scoping.
+	parseTag := chosenTag
+	for i := range opts.TagSources {
+		if opts.TagSources[i].ID == chosenSourceID {
+			if prefix := opts.TagSources[i].StripPrefix; prefix != "" {
+				parseTag = strings.TrimPrefix(parseTag, prefix)
+			}
+			break
+		}
+	}
+
 	// Parse the chosen tag. Semver tags populate base/major/minor/patch;
 	// non-semver tags render raw.
-	if m := semverRe.FindStringSubmatch(chosenTag); m != nil {
+	if m := semverRe.FindStringSubmatch(parseTag); m != nil {
 		populateSemver(v, m)
 	} else {
-		raw := strings.TrimPrefix(chosenTag, "v")
+		raw := strings.TrimPrefix(parseTag, "v")
 		v.Version = raw
 		v.Base = raw
 	}
@@ -222,9 +249,10 @@ func DetectVersionWithOpts(rootDir string, opts *VersioningOpts) (*VersionInfo, 
 
 // walkBaseFromSearchPath iterates rule.BaseFromIDs in declared order. For
 // each id, looks up the precompiled regex and scans tags in git's order.
-// Returns the first tag matching the current source's pattern. If no source
-// in the path yields a hit, returns ("", nil) so the caller can invoke
-// applyNoLineage.
+// Returns the first tag matching the current source's pattern AND the id
+// of the source that matched (so callers can apply per-source transforms
+// like StripPrefix). If no source in the path yields a hit, returns
+// ("", "", nil) so the caller can invoke applyNoLineage.
 //
 // Do NOT convert "no match" into an error.
 // "No match" is a valid state — it triggers no_lineage policy, which the
@@ -234,12 +262,12 @@ func walkBaseFromSearchPath(
 	tags []string,
 	rule *BranchRule,
 	sourceRes map[string]*regexp.Regexp,
-) (string, error) {
+) (tag string, sourceID string, err error) {
 	// Runtime invariant guard: validation already rejects empty base_from,
 	// but defend the invariant here too. If someone weakens validation later,
 	// runtime still refuses to lie.
 	if len(rule.BaseFromIDs) == 0 {
-		return "", fmt.Errorf(
+		return "", "", fmt.Errorf(
 			"versioning: branch rule %q has empty base_from (validation bug)",
 			rule.ID)
 	}
@@ -247,33 +275,38 @@ func walkBaseFromSearchPath(
 		re, ok := sourceRes[id]
 		if !ok {
 			// Validation bug — fail loud.
-			return "", fmt.Errorf(
+			return "", "", fmt.Errorf(
 				"versioning: base_from id %q not found in compiled tag_sources",
 				id)
 		}
-		for _, tag := range tags {
-			if re.MatchString(tag) {
-				return tag, nil
+		for _, t := range tags {
+			if re.MatchString(t) {
+				return t, id, nil
 			}
 		}
 		// No match in this source — advance to next id in the path.
 	}
-	return "", nil // search path exhausted
+	return "", "", nil // search path exhausted
 }
 
 // selectBranchRule returns the rule whose Match regex matches the current
 // branch, falling back to the default rule if no named rule matches.
 //
-// Validation guarantees default appears last, so in practice defaultRule is
-// only set on the final iteration. The code still walks the whole slice
-// before returning default — even if validation is accidentally weakened
-// later, the semantics stay correct: default only wins if no named rule
-// matched.
+// The "default" concept is expressed as a boolean flag (BranchRule.IsDefault),
+// NOT a magic string comparison. The flag is set at opts-build time from
+// the YAML id "default", which gives validation a single place to enforce
+// the catch-all semantics without runtime depending on string equality.
+//
+// Validation guarantees the default rule appears last, so in practice
+// defaultRule is only set on the final iteration. The code still walks the
+// whole slice before returning default — even if validation is accidentally
+// weakened later, the semantics stay correct: default only wins if no named
+// rule matched.
 func selectBranchRule(opts *VersioningOpts, branch string) (*BranchRule, error) {
 	var defaultRule *BranchRule
 	for i := range opts.BranchRules {
 		r := &opts.BranchRules[i]
-		if r.ID == "default" {
+		if r.IsDefault {
 			defaultRule = r
 			continue // do NOT return here — keep scanning
 		}
@@ -388,6 +421,9 @@ func splitLines(s string) []string {
 // chains), but silent overlap causes surprising selection. Runtime sampling
 // against real git tags is the honest answer — regex intersection is
 // undecidable in general.
+//
+// Routes through diag.Warn, not raw os.Stderr — structured diagnostics flow
+// is the only warning channel for core engine code.
 func emitTagSourceOverlapWarnings(tags []string, sourceRes map[string]*regexp.Regexp) {
 	warned := make(map[string]bool)
 	for _, tag := range tags {
@@ -402,8 +438,7 @@ func emitTagSourceOverlapWarnings(tags []string, sourceRes map[string]*regexp.Re
 			key := strings.Join(hits, ",")
 			if !warned[key] {
 				warned[key] = true
-				fmt.Fprintf(os.Stderr,
-					"warning: versioning: tag %q matches multiple tag_sources: %v (intentional overlap is OK; tighten patterns if unintended)\n",
+				diag.Warn("versioning: tag %q matches multiple tag_sources: %v (intentional overlap is OK; tighten patterns if unintended)",
 					tag, hits)
 			}
 		}
@@ -414,6 +449,8 @@ func emitTagSourceOverlapWarnings(tags []string, sourceRes map[string]*regexp.Re
 // tags. git's --sort=-v:refname is semver-aware, so non-semver tags may not
 // iterate in chronological or lexical order. The warning is operator
 // guidance; StageFreight does not reinterpret or re-sort.
+//
+// Routes through diag.Warn, not raw os.Stderr.
 func emitNonSemverOrderingWarnings(tags []string, sourceRes map[string]*regexp.Regexp) {
 	const sampleSize = 10
 	const exampleCount = 3
@@ -441,8 +478,7 @@ func emitNonSemverOrderingWarnings(tags []string, sourceRes map[string]*regexp.R
 			if n > len(matched) {
 				n = len(matched)
 			}
-			fmt.Fprintf(os.Stderr,
-				"warning: versioning: tag_source %q matches non-semver tags (sample: %v); git's semver-aware sort may not reflect chronological intent — consider zero-padding or a semver-compatible naming convention\n",
+			diag.Warn("versioning: tag_source %q matches non-semver tags (sample: %v); git's semver-aware sort may not reflect chronological intent — consider zero-padding or a semver-compatible naming convention",
 				id, matched[:n])
 		}
 	}

@@ -55,10 +55,11 @@ func versioningOptsFromConfig(cfg *config.Config) (*gitver.VersioningOpts, error
 	for _, bb := range cfg.Versioning.BranchBuilds {
 		rule := gitver.BranchRule{
 			ID:          bb.ID,
+			IsDefault:   bb.ID == "default",
 			BaseFromIDs: append([]string(nil), bb.BaseFrom...), // defensive copy
 			Format:      bb.Format,
 		}
-		if bb.ID != "default" {
+		if !rule.IsDefault {
 			// Fail closed: do not silently accept an empty regex if the
 			// matcher reference is unknown. Validation should already have
 			// caught this, but double-enforce here — defense in depth.

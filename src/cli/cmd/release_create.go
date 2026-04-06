@@ -516,7 +516,7 @@ func RunReleaseCreate(req ReleaseCreateRequest) error {
 		// tag_sources as map is ONLY for when.git_tags lookup on target conditions.
 		// DO NOT reuse this for version selection — that would reintroduce
 		// global filtering and break the search-path invariant.
-		tagPatternMap := tagSourceMap(req.Config.Versioning.TagSources)
+		tagPatternMap := tagPatternLookupForConditionsOnly(req.Config.Versioning.TagSources)
 		// Check when conditions on the primary release target
 		if targetWhenMatches(*primaryRelease, currentTag, tagPatternMap, req.Config.Matchers.Branches) {
 			rollingTags := gitver.ResolveTags(primaryRelease.Aliases, versionInfo)
@@ -595,7 +595,7 @@ func RunReleaseCreate(req ReleaseCreateRequest) error {
 		// tag_sources as map is ONLY for when.git_tags lookup on target conditions.
 		// DO NOT reuse this for version selection — that would reintroduce
 		// global filtering and break the search-path invariant.
-		remoteTagPatternMap := tagSourceMap(req.Config.Versioning.TagSources)
+		remoteTagPatternMap := tagPatternLookupForConditionsOnly(req.Config.Versioning.TagSources)
 
 		// Path 1: Explicit target overrides.
 		for _, t := range remoteReleases {
@@ -694,7 +694,7 @@ func buildImageRowsFromConfig(cfg *config.Config, currentTag string, versionInfo
 	// tag_sources as map is ONLY for when.git_tags lookup on target conditions.
 	// DO NOT reuse this for version selection — that would reintroduce
 	// global filtering and break the search-path invariant.
-	registryTagPatternMap := tagSourceMap(cfg.Versioning.TagSources)
+	registryTagPatternMap := tagPatternLookupForConditionsOnly(cfg.Versioning.TagSources)
 
 	for _, t := range pipeline.CollectTargetsByKind(cfg, "registry") {
 		if !targetWhenMatches(t, currentTag, registryTagPatternMap, cfg.Matchers.Branches) {

@@ -864,7 +864,7 @@ func releaseTagMatchesAnyTarget(appCfg *config.Config, tag string) bool {
 	//
 	// If you find yourself thinking "I can share this map with gitver", stop
 	// and re-read the INVARIANT comment at the top of gitver.DetectVersionWithOpts.
-	tagPatternMap := tagSourceMap(appCfg.Versioning.TagSources)
+	tagPatternMap := tagPatternLookupForConditionsOnly(appCfg.Versioning.TagSources)
 
 	hasConstraints := false
 	for _, t := range releaseTargets {
@@ -886,12 +886,22 @@ func releaseTagMatchesAnyTarget(appCfg *config.Config, tag string) bool {
 //
 // The skeleton defines generic CI event classes; StageFreight enforces
 // repo-specific tag eligibility at runtime from .stagefreight.yml policy.
-// tagSourceMap flattens a tag_sources slice into an id → pattern map for
-// use at when.git_tags lookup boundaries. This is the ONLY place in the
-// codebase where tag_sources is converted to a map. It must stay scoped
-// to target condition resolution — NEVER reuse this for version selection
-// (that would reintroduce global filtering).
-func tagSourceMap(sources []config.TagSourceConfig) map[string]string {
+// tagPatternLookupForConditionsOnly flattens a tag_sources slice into an
+// id → pattern map for the SOLE purpose of resolving target.when.git_tags
+// references. The name is deliberately hostile: any reuse of this map
+// for version selection would reintroduce global filtering and break the
+// search-path invariant enforced by gitver.DetectVersionWithOpts.
+//
+// Do NOT:
+//   - pass this map to gitver
+//   - reuse it in detectVersion
+//   - cache it at package scope
+//   - rename it to something friendlier
+//
+// If you need a pattern lookup somewhere else in the codebase, build your
+// own local map at the call site with the same CRITICAL guard comment.
+// Keeping a second copy is cheaper than sharing one that tempts misuse.
+func tagPatternLookupForConditionsOnly(sources []config.TagSourceConfig) map[string]string {
 	m := make(map[string]string, len(sources))
 	for _, ts := range sources {
 		m[ts.ID] = ts.Pattern
