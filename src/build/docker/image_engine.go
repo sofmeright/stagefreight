@@ -138,12 +138,14 @@ func planDockerBuild(b config.BuildConfig, cfg *config.Config, det *build.Detect
 			continue
 		}
 
-		// Resolve templates using vars
-		resolvedURL := gitver.ResolveVars(t.URL, cfg.Vars)
-		resolvedURL = build.ResolveTemplate(resolvedURL, versionInfo)
+		// Resolve registry identity from identity graph or legacy inline fields.
+		resolved, err := config.ResolveRegistryForTarget(t, cfg.Registries, cfg.Vars)
+		if err != nil {
+			return nil, fmt.Errorf("target[%d] %q: %w", i, t.ID, err)
+		}
 
-		resolvedPath := gitver.ResolveVars(t.Path, cfg.Vars)
-		resolvedPath = build.ResolveTemplate(resolvedPath, versionInfo)
+		resolvedURL := build.ResolveTemplate(resolved.URL, versionInfo)
+		resolvedPath := build.ResolveTemplate(resolved.Path, versionInfo)
 
 		tagTemplates := make([]string, len(t.Tags))
 		for j, tmpl := range t.Tags {
@@ -151,20 +153,20 @@ func planDockerBuild(b config.BuildConfig, cfg *config.Config, det *build.Detect
 		}
 		resolvedTags := build.ResolveTags(tagTemplates, versionInfo)
 
-		// Resolve provider: explicit config, or auto-detect from URL
-		provider := t.Provider
+		// Resolve provider: from registry/target, or auto-detect from URL.
+		provider := resolved.Provider
 		if provider == "" {
 			provider = build.DetectProvider(resolvedURL)
 		}
 
-		// Validate resolved tags conform to OCI spec
+		// Validate resolved tags conform to OCI spec.
 		for _, tag := range resolvedTags {
 			if err := registry.ValidateTag(tag); err != nil {
-				return nil, fmt.Errorf("target[%d] %q (%s/%s): resolved tag: %w", i, t.ID, t.URL, t.Path, err)
+				return nil, fmt.Errorf("target[%d] %q (%s/%s): resolved tag: %w", i, t.ID, resolvedURL, resolvedPath, err)
 			}
 		}
 
-		// Map retention (pointer to value)
+		// Map retention (pointer to value).
 		var retention config.RetentionPolicy
 		if t.Retention != nil {
 			retention = *t.Retention
@@ -174,7 +176,7 @@ func planDockerBuild(b config.BuildConfig, cfg *config.Config, det *build.Detect
 			URL:         resolvedURL,
 			Path:        resolvedPath,
 			Tags:        resolvedTags,
-			Credentials: t.Credentials,
+			Credentials: resolved.Credentials,
 			Provider:    provider,
 			Retention:   retention,
 			TagPatterns: t.Tags,
