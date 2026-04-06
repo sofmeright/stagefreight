@@ -21,14 +21,23 @@ type ForgeConfig struct {
 // Forbidden combinations: primary + mirror (authoritative ≠ derivative).
 // Allowed combinations: publish-origin + primary, publish-origin + mirror.
 type RepoConfig struct {
-	ID            string     `yaml:"id"`                       // unique identifier
-	Forge         string     `yaml:"forge"`                    // references forges[].id
-	Project       string     `yaml:"project"`                  // project path on the forge (e.g., "{var:gitlab_group}/{var:repo}")
-	Roles         []string   `yaml:"roles,omitempty"`          // ["primary"] | ["mirror"] | ["mirror", "publish-origin"] | []
-	DefaultBranch string     `yaml:"default_branch,omitempty"` // e.g., "main"
-	Worktree      string     `yaml:"worktree,omitempty"`       // local working tree path (primary only)
-	Ref           string     `yaml:"ref,omitempty"`            // pinned ref for non-primary repos (governance, presets)
-	Sync          SyncConfig `yaml:"sync,omitempty"`           // mirror sync domains
+	ID       string         `yaml:"id"`                 // unique identifier
+	Forge    string         `yaml:"forge"`              // references forges[].id
+	Project  string         `yaml:"project"`            // project path on the forge (e.g., "{var:gitlab_group}/{var:repo}")
+	Roles    []string       `yaml:"roles,omitempty"`    // ["primary"] | ["mirror"] | ["mirror", "publish-origin"] | []
+	Branches BranchesConfig `yaml:"branches,omitempty"` // branch identity (default, protected, etc.)
+	Worktree string         `yaml:"worktree,omitempty"` // local working tree path (primary only)
+	Ref      string         `yaml:"ref,omitempty"`      // pinned ref for non-primary repos (governance, presets)
+	Sync     SyncConfig     `yaml:"sync,omitempty"`     // mirror sync domains
+}
+
+// BranchesConfig declares branch identity for a repo.
+// Currently carries only Default; reserved for future additions like
+// protected branches, release branches, etc. — those stay on the repo
+// because they're topology, not versioning or promotion.
+type BranchesConfig struct {
+	// Default is the default branch name (e.g., "main"). Required for primary.
+	Default string `yaml:"default,omitempty"`
 }
 
 // HasRole returns true if the repo has the given role.
@@ -116,8 +125,8 @@ func ValidateIdentityGraph(forges []ForgeConfig, repos []RepoConfig, registries 
 		// Count roles for cardinality checks.
 		if r.HasRole("primary") {
 			primaryCount++
-			if r.DefaultBranch == "" {
-				errs = append(errs, fmt.Sprintf("repos[%s]: default_branch is required for primary", r.ID))
+			if r.Branches.Default == "" {
+				errs = append(errs, fmt.Sprintf("repos[%s]: branches.default is required for primary", r.ID))
 			}
 		}
 		if r.HasRole("publish-origin") {

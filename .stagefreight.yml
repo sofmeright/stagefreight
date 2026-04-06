@@ -46,7 +46,8 @@ repos:
     forge: gitlab
     project: "{var:gitlab_group}/{var:repo}"
     roles: [primary]
-    default_branch: "main"
+    branches:
+      default: main
     worktree: "."
 
   - id: github-mirror

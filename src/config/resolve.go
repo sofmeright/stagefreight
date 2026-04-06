@@ -7,6 +7,9 @@ import (
 
 // ResolvedRepo is a fully resolved repo with all identity fields populated
 // from the forge + repo graph. Ready for forge client creation.
+//
+// DefaultBranch is the flattened view of repo.Branches.Default — resolved
+// once at load time so consumers don't need to know the nested shape.
 type ResolvedRepo struct {
 	ID            string
 	Provider      string   // from forge
@@ -14,7 +17,7 @@ type ResolvedRepo struct {
 	Project       string   // from repo
 	Credentials   string   // from forge
 	Roles         []string // from repo (primary, mirror, publish-origin)
-	DefaultBranch string
+	DefaultBranch string   // flattened from repo.Branches.Default
 	Worktree      string
 	Ref           string
 	Sync          SyncConfig
@@ -55,7 +58,7 @@ func ResolveRepo(repo RepoConfig, forges []ForgeConfig, vars map[string]string) 
 		Project:       resolveVarsInline(repo.Project, vars),
 		Credentials:   forge.Credentials,
 		Roles:         repo.Roles,
-		DefaultBranch: repo.DefaultBranch,
+		DefaultBranch: repo.Branches.Default,
 		Worktree:      repo.Worktree,
 		Ref:           repo.Ref,
 		Sync:          repo.Sync,
