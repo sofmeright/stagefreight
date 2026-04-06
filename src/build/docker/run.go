@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/PrPlanIT/StageFreight/src/build/pipeline"
+	"github.com/PrPlanIT/StageFreight/src/config"
 	"github.com/PrPlanIT/StageFreight/src/gitver"
 	"github.com/PrPlanIT/StageFreight/src/output"
 	"github.com/PrPlanIT/StageFreight/src/postbuild"
@@ -84,12 +85,18 @@ func contextKV(pc *pipeline.PipelineContext) []output.KV {
 
 	regTargets := pipeline.CollectTargetsByKind(pc.Config, "registry")
 	if len(regTargets) > 0 {
+		// Resolve each target through the identity graph so registry-id
+		// references surface their URL for the diagnostic header.
 		var regNames []string
 		seen := make(map[string]bool)
 		for _, t := range regTargets {
-			if !seen[t.URL] {
-				regNames = append(regNames, t.URL)
-				seen[t.URL] = true
+			reg, err := config.ResolveRegistryForTarget(t, pc.Config.Registries, pc.Config.Vars)
+			if err != nil || reg == nil || reg.URL == "" {
+				continue
+			}
+			if !seen[reg.URL] {
+				regNames = append(regNames, reg.URL)
+				seen[reg.URL] = true
 			}
 		}
 		kv = append(kv, output.KV{Key: "Registries", Value: fmt.Sprintf("%d (%s)", len(regTargets), strings.Join(regNames, ", "))})

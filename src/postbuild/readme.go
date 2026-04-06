@@ -46,9 +46,22 @@ func RunReadmeSection(ctx context.Context, w io.Writer, _ bool, color bool, targ
 	linkBase, _ := config.ResolveLinkBase(appCfg)
 	rawBase, _ := config.ResolvePublishOrigin(appCfg)
 
+	// Resolved registry identity per target, keyed by target ID. Resolved
+	// once here so the summary loop below doesn't re-resolve.
+	resolvedByTarget := make(map[string]*config.ResolvedRegistry, len(targets))
+
 	for _, t := range targets {
-		// Resolve {var:...} templates in target fields
-		resolvedPath := gitver.ResolveVars(t.Path, appCfg.Vars)
+		// Resolve registry identity via the identity graph. Targets may use
+		// either `registry: <id>` references or legacy inline fields —
+		// ResolveRegistryForTarget handles both shapes and fails closed on
+		// unresolved references.
+		reg, err := config.ResolveRegistryForTarget(t, appCfg.Registries, appCfg.Vars)
+		if err != nil || reg == nil {
+			errors++
+			continue
+		}
+		resolvedByTarget[t.ID] = reg
+
 		resolvedDesc := gitver.ResolveVars(t.Description, appCfg.Vars)
 
 		file := t.File
@@ -62,12 +75,12 @@ func RunReadmeSection(ctx context.Context, w io.Writer, _ bool, color bool, targ
 			continue
 		}
 
-		provider := t.Provider
+		provider := reg.Provider
 		if provider == "" {
-			provider = build.DetectProvider(t.URL)
+			provider = build.DetectProvider(reg.URL)
 		}
 
-		client, err := registry.NewRegistry(provider, t.URL, t.Credentials)
+		client, err := registry.NewRegistry(provider, reg.URL, reg.Credentials)
 		if err != nil {
 			errors++
 			continue
@@ -78,7 +91,7 @@ func RunReadmeSection(ctx context.Context, w io.Writer, _ bool, color bool, targ
 			short = resolvedDesc
 		}
 
-		if err := client.UpdateDescription(ctx, resolvedPath, short, content.Full); err != nil {
+		if err := client.UpdateDescription(ctx, reg.Path, short, content.Full); err != nil {
 			errors++
 			continue
 		}
@@ -88,8 +101,12 @@ func RunReadmeSection(ctx context.Context, w io.Writer, _ bool, color bool, targ
 	elapsed := time.Since(start)
 	sec := output.NewSection(w, "Readme", elapsed, color)
 	for _, t := range targets {
-		resolvedPath := gitver.ResolveVars(t.Path, appCfg.Vars)
-		sec.Row("%-40ssynced", t.URL+"/"+resolvedPath)
+		reg, ok := resolvedByTarget[t.ID]
+		if !ok || reg == nil {
+			sec.Row("%-40sfailed: unresolved registry", t.ID)
+			continue
+		}
+		sec.Row("%-40ssynced", reg.URL+"/"+reg.Path)
 	}
 	sec.Close()
 	output.SectionEnd(w, "sf_readme")

@@ -190,15 +190,31 @@ func CollectNarratorBadgeItems(appCfg *config.Config) []config.NarratorItem {
 	return items
 }
 
-// DockerHubFromConfig returns the namespace and repo for the first docker.io registry target.
+// DockerHubFromConfig returns the namespace and repo for the first docker.io
+// registry target. Walks the identity graph via ResolveRegistryForTarget so
+// targets using `registry: <id>` references resolve correctly — legacy
+// inline `url: docker.io` + `path: ...` targets still work because the
+// resolver accepts both shapes.
 func DockerHubFromConfig(appCfg *config.Config) (string, string) {
 	for _, t := range appCfg.Targets {
-		if t.Kind == "registry" && t.URL == "docker.io" && t.Path != "" {
-			resolved := gitver.ResolveVars(t.Path, appCfg.Vars)
-			parts := strings.SplitN(resolved, "/", 2)
-			if len(parts) == 2 {
-				return parts[0], parts[1]
-			}
+		if t.Kind != "registry" {
+			continue
+		}
+		resolved, err := config.ResolveRegistryForTarget(t, appCfg.Registries, appCfg.Vars)
+		if err != nil || resolved == nil {
+			continue
+		}
+		// Match Docker Hub by provider (preferred) or URL (legacy inline).
+		isDockerHub := resolved.Provider == "docker" ||
+			resolved.URL == "docker.io" ||
+			resolved.URL == "https://docker.io" ||
+			resolved.URL == "https://hub.docker.com"
+		if !isDockerHub || resolved.Path == "" {
+			continue
+		}
+		parts := strings.SplitN(resolved.Path, "/", 2)
+		if len(parts) == 2 {
+			return parts[0], parts[1]
 		}
 	}
 	return "", ""

@@ -224,7 +224,7 @@ func runCrucibleMode(req Request) error {
 		if cacheBranch == "" {
 			cacheBranch = "default"
 		}
-		_, publishCacheTo = BuildCacheFlags(req.Config.BuildCache, cacheRepoID, cacheBranch, req.Config.Targets)
+		_, publishCacheTo = BuildCacheFlags(req.Config.BuildCache, cacheRepoID, cacheBranch, req.Config.Targets, req.Config.Registries, req.Config.Vars)
 	}
 
 	// ── Build (pass 1: candidate) ────────────────────────────────
@@ -409,7 +409,7 @@ func runCrucibleMode(req Request) error {
 
 		ext := req.Config.BuildCache.External
 		if ext.Target != "" && (ext.Retention.MaxRefs > 0 || ext.Retention.StaleAge != "") {
-			extRetResult := enforceExternalRetention(ctx, ext, repoID, req.Config.Targets)
+			extRetResult := enforceExternalRetention(ctx, ext, repoID, req.Config.Targets, req.Config.Registries, req.Config.Vars)
 			renderExternalRetention(w, color, extRetResult)
 		}
 	}
@@ -690,12 +690,18 @@ func buildContextKV(req Request) []output.KV {
 
 	regTargets := pipeline.CollectTargetsByKind(req.Config, "registry")
 	if len(regTargets) > 0 {
+		// Resolve each target through the identity graph so registry-id
+		// references surface their URL for the diagnostic header.
 		var regNames []string
 		seen := make(map[string]bool)
 		for _, t := range regTargets {
-			if !seen[t.URL] {
-				regNames = append(regNames, t.URL)
-				seen[t.URL] = true
+			reg, err := config.ResolveRegistryForTarget(t, req.Config.Registries, req.Config.Vars)
+			if err != nil || reg == nil || reg.URL == "" {
+				continue
+			}
+			if !seen[reg.URL] {
+				regNames = append(regNames, reg.URL)
+				seen[reg.URL] = true
 			}
 		}
 		kv = append(kv, output.KV{Key: "Registries", Value: fmt.Sprintf("%d (%s)", len(regTargets), strings.Join(regNames, ", "))})

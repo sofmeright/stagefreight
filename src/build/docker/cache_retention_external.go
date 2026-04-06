@@ -43,7 +43,7 @@ func externalCacheRetentionHook() pipeline.PostBuildHook {
 			ext := pc.Config.BuildCache.External
 			repoID := resolveRepoIDFromContext(pc)
 
-			result := enforceExternalRetention(pc.Ctx, ext, repoID, pc.Config.Targets)
+			result := enforceExternalRetention(pc.Ctx, ext, repoID, pc.Config.Targets, pc.Config.Registries, pc.Config.Vars)
 			renderExternalRetention(pc.Writer, pc.Color, result)
 
 			// Record in pipeline state for governance/diagnostics.
@@ -77,10 +77,10 @@ func externalCacheRetentionHook() pipeline.PostBuildHook {
 // enforceExternalRetention lists cache tags on the registry and prunes stale ones.
 // Scope: only tags matching the deterministic cache prefix (e.g., "cache-").
 // Ownership proof: tag must start with the configured path prefix + "-".
-func enforceExternalRetention(ctx context.Context, ext config.ExternalCacheConfig, repoID string, targets []config.TargetConfig) ExternalRetentionResult {
+func enforceExternalRetention(ctx context.Context, ext config.ExternalCacheConfig, repoID string, targets []config.TargetConfig, registries []config.RegistryConfig, vars map[string]string) ExternalRetentionResult {
 	result := ExternalRetentionResult{}
 
-	targetRef := resolveTargetRef(ext.Target, targets)
+	targetRef := resolveTargetRef(ext.Target, targets, registries, vars)
 	if targetRef == "" {
 		result.Errors = append(result.Errors, "cache target not resolved")
 		return result

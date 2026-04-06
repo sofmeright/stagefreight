@@ -88,7 +88,7 @@ func (e *imageEngine) Plan(ctx context.Context, cfgRaw interface{}, det *build.D
 		if branch == "" {
 			branch = "default"
 		}
-		cacheFrom, cacheTo := BuildCacheFlags(cfg.BuildCache, repoID, branch, cfg.Targets)
+		cacheFrom, cacheTo := BuildCacheFlags(cfg.BuildCache, repoID, branch, cfg.Targets, cfg.Registries, cfg.Vars)
 		for i := range plan.Steps {
 			plan.Steps[i].CacheFrom = cacheFrom
 			if plan.Steps[i].Push {
