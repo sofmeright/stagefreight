@@ -206,8 +206,6 @@ func (e *Engine) doReplayThenPush(result *SyncResult, class gitstate.StateClass,
 		From: class, Action: "REPLAY",
 		Note: fmt.Sprintf("%d ahead, %d behind %s", state.AheadCount, state.BehindCount, state.UpstreamRef),
 	})
-	// Replay owns its own fetch internally (already done above) but needs
-	// the session for the upstream hash recorded at fetch time.
 	if err := Replay(e.session); err != nil {
 		return result, fmt.Errorf("replay: %w", err)
 	}

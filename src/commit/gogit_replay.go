@@ -25,15 +25,16 @@ const sfGeneratedTrailer = "X-StageFreight-Generated: true"
 //
 // Algorithm:
 //  0. Pre-conditions: HEAD attached, worktree clean, upstream configured → fail fast, no mutation
-//  1. Gate: ALL commits must carry sfGeneratedTrailer, no merges, linear chain
-//  2. Fetch upstream; re-validate upstream not zero; record fetchedUpstreamHash
+//  1. Gate: no merge commits, linear chain (structural only — no authorship constraints)
+//  2. Re-validate upstream hash non-zero; record fetchedUpstreamHash
 //  3. Compute merge-base (exactly 1); collect commits oldest-first
-//  4. Record originalHEAD tree hash
-//  5. Hard reset to upstream
-//  6. For each commit: apply diff, add, verify index (forward + reverse), commit, verify tree
-//  7. Post-verification: newHEAD tree == originalHEAD tree
-//  8. Race guard: upstream unchanged since fetch
-//  9. Push
+//  4. Hard reset to upstream
+//  5. For each commit: apply diff, stage, verify staging states, commit
+//  6. Race guard: upstream unchanged since fetch
+//
+// Push is NOT performed by Replay — the engine (Engine.doReplayThenPush) owns push
+// so the transition DIVERGED → REPLAY → CLEAN_AHEAD → PUSH remains in the engine's
+// state machine and the push is logged as a formal transition.
 //
 // Hooks are NOT run during replay — replay commits are machine-generated
 // re-applications; running hooks again would double-execute side effects.
@@ -117,7 +118,10 @@ func Replay(session *gitstate.SyncSession) error {
 	})
 
 	if len(commits) == 0 {
-		return session.Push(state.RemoteName, "", false)
+		// No local commits between HEAD and the merge base — nothing to replay.
+		// The engine should have classified this as CLEAN_SYNCED before calling
+		// Replay; reaching here is a caller bug.
+		return fmt.Errorf("replay called with no local commits to replay (state should have been CLEAN_SYNCED)")
 	}
 
 	// Reverse to oldest-first
@@ -159,8 +163,9 @@ func Replay(session *gitstate.SyncSession) error {
 		return gitstate.ErrUpstreamMoved
 	}
 
-	// 9. Push
-	return session.Push(state.RemoteName, "", false)
+	// Push is the engine's responsibility — Replay() owns only the rebase.
+	// The caller (Engine.doReplayThenPush) will call doPush() after Replay returns.
+	return nil
 }
 
 // validateReplayGate validates all commits against gate conditions.

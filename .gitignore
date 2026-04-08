@@ -5,4 +5,5 @@ src/output/banner_art_gen.go
 # compiled binaries — never commit these
 /cli
 /stagefreight
+/stagefreight-bin
 *.exe

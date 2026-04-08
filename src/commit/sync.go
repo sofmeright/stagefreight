@@ -2,9 +2,39 @@ package commit
 
 import (
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
+
+	"github.com/PrPlanIT/StageFreight/src/gitstate"
 )
+
+// gogitEngineMode reads STAGEFREIGHT_GOGIT_ENGINE and returns the active mode.
+//
+//	off    (default) — legacy shell-out path only
+//	shadow            — legacy path is authoritative; go-git engine runs in parallel
+//	                    for parity verification; mismatch returns an error
+//	on                — go-git engine is authoritative; legacy path not used
+//
+// This is migration scaffolding only — not user-facing product config.
+type gogitMode int
+
+const (
+	gogitModeOff    gogitMode = iota // legacy only
+	gogitModeShadow                  // both; legacy authoritative
+	gogitModeOn                      // go-git authoritative
+)
+
+func gogitEngineMode() gogitMode {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("STAGEFREIGHT_GOGIT_ENGINE"))) {
+	case "shadow":
+		return gogitModeShadow
+	case "off", "false", "0":
+		return gogitModeOff
+	default:
+		return gogitModeOn
+	}
+}
 
 // SyncAction names a single step in the repository convergence plan.
 type SyncAction string
@@ -232,4 +262,83 @@ func containsAction(actions []SyncAction, action SyncAction) bool {
 		}
 	}
 	return false
+}
+
+// Push is the public entry point for standalone push (stagefreight push).
+// Routes through the same engine-mode gate as Execute()'s push path so
+// STAGEFREIGHT_GOGIT_ENGINE controls both code paths uniformly.
+func (g *GitBackend) Push(opts PushOptions) (*SyncResult, error) {
+	switch gogitEngineMode() {
+	case gogitModeOn:
+		return g.pushViaEngine(opts)
+	case gogitModeShadow:
+		state, err := g.DetectRepoState()
+		if err != nil {
+			return nil, fmt.Errorf("detecting repo state: %w", err)
+		}
+		syncPlan, err := PlanSync(state, opts.Remote, opts.Refspec, opts.RebaseOnDiverge)
+		if err != nil {
+			return nil, err
+		}
+		legacyResult, err := g.Sync(syncPlan)
+		if err != nil {
+			return nil, err
+		}
+		newResult, newErr := g.pushViaEngine(opts)
+		if newErr != nil {
+			return nil, fmt.Errorf("shadow parity failure: go-git engine error after legacy success: %w", newErr)
+		}
+		if containsAction(legacyResult.ActionsExecuted, SyncPush) != containsAction(newResult.ActionsExecuted, SyncPush) {
+			return nil, fmt.Errorf(
+				"shadow parity mismatch: legacy pushed=%v go-git pushed=%v",
+				containsAction(legacyResult.ActionsExecuted, SyncPush),
+				containsAction(newResult.ActionsExecuted, SyncPush),
+			)
+		}
+		return legacyResult, nil
+	default: // off
+		state, err := g.DetectRepoState()
+		if err != nil {
+			return nil, fmt.Errorf("detecting repo state: %w", err)
+		}
+		syncPlan, err := PlanSync(state, opts.Remote, opts.Refspec, opts.RebaseOnDiverge)
+		if err != nil {
+			return nil, err
+		}
+		return g.Sync(syncPlan)
+	}
+}
+
+// pushViaEngine synchronizes the current branch using the go-git convergence engine.
+// Called when STAGEFREIGHT_GOGIT_ENGINE=on, or as the new-path in shadow mode.
+// Legacy path: DetectRepoState → PlanSync → Sync (shell-out).
+// This path: gitstate.OpenSyncSession → Engine.Sync (pure go-git).
+func (g *GitBackend) pushViaEngine(opts PushOptions) (*SyncResult, error) {
+	session, err := gitstate.OpenSyncSession(g.RootDir)
+	if err != nil {
+		return nil, fmt.Errorf("opening sync session: %w", err)
+	}
+	engine := NewEngine(session, EngineOptions{
+		RebaseOnDiverge: opts.RebaseOnDiverge,
+		Remote:          opts.Remote,
+		Refspec:         opts.Refspec,
+		OnEvent:         g.onSyncEvent,
+	})
+	return engine.Sync()
+}
+
+// onSyncEvent routes a state-machine transition event to OnCommitLine.
+// This stays in the presentation callback path — no direct output from backend.
+func (g *GitBackend) onSyncEvent(ev gitstate.TransitionEvent) {
+	if g.OnCommitLine == nil {
+		return
+	}
+	msg := fmt.Sprintf("transition: %s → %s", ev.From, ev.Action)
+	if ev.To != "" {
+		msg += fmt.Sprintf(" → %s", ev.To)
+	}
+	if ev.Note != "" {
+		msg += " [" + ev.Note + "]"
+	}
+	g.OnCommitLine("sync", msg)
 }

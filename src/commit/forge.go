@@ -4,11 +4,10 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strings"
 
 	"github.com/PrPlanIT/StageFreight/src/forge"
+	"github.com/PrPlanIT/StageFreight/src/gitstate"
 )
 
 // ForgeBackend creates commits purely via forge API (no local git commit).
@@ -20,9 +19,22 @@ type ForgeBackend struct {
 
 // Execute resolves changed files, reads their content, and commits via forge API.
 func (f *ForgeBackend) Execute(ctx context.Context, plan *Plan, conventional bool) (*Result, error) {
+	// Open repo once — used for all gitstate-based file resolution.
+	repo, err := gitstate.OpenRepo(f.RootDir)
+	if err != nil {
+		return nil, fmt.Errorf("opening repo: %w", err)
+	}
+	wt, err := repo.Worktree()
+	if err != nil {
+		return nil, fmt.Errorf("opening worktree: %w", err)
+	}
+	status, err := wt.Status()
+	if err != nil {
+		return nil, fmt.Errorf("reading worktree status: %w", err)
+	}
+
 	// 1. Resolve file list
 	var changes []FileChange
-	var err error
 	switch plan.StageMode {
 	case StageExplicit:
 		for _, p := range plan.Paths {
@@ -36,22 +48,21 @@ func (f *ForgeBackend) Execute(ctx context.Context, plan *Plan, conventional boo
 				return nil, fmt.Errorf("stat %s: %w", p, statErr)
 			}
 			if info.IsDir() {
-				dirChanges, dirErr := gitChangedFilesInDir(f.RootDir, p)
-				if dirErr != nil {
-					return nil, fmt.Errorf("expanding directory %s: %w", p, dirErr)
+				for _, c := range gitstate.ChangedFilesInDir(status, p) {
+					changes = append(changes, FileChange{Path: c.Path, Deleted: c.Deleted})
 				}
-				changes = append(changes, dirChanges...)
 			} else {
 				changes = append(changes, FileChange{Path: p})
 			}
 		}
 	case StageAll:
-		changes, err = gitChangedFiles(f.RootDir)
+		for _, c := range gitstate.ChangedFiles(status) {
+			changes = append(changes, FileChange{Path: c.Path, Deleted: c.Deleted})
+		}
 	case StageStaged:
-		changes, err = gitStagedChanges(f.RootDir)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("resolving files: %w", err)
+		for _, c := range gitstate.StagedChanges(status) {
+			changes = append(changes, FileChange{Path: c.Path, Deleted: c.Deleted})
+		}
 	}
 
 	// 2. No-op check
@@ -106,119 +117,4 @@ func (f *ForgeBackend) Execute(ctx context.Context, plan *Plan, conventional boo
 type FileChange struct {
 	Path    string
 	Deleted bool
-}
-
-// parsePorcelainStatus parses NUL-delimited `git status --porcelain=v1 -z` output.
-//
-// Format: each record is "XY path\0" where XY is the two-column status.
-// For renames/copies (X or Y is R/C), the record is "XY oldpath\0newpath\0"
-// — the old path is embedded in the first record after the status prefix,
-// and the new (destination) path follows as a separate NUL-delimited record.
-// We use the new path since that's the file that exists in the working tree.
-//
-// Deduplicates by final path to handle rename+edit combos.
-func parsePorcelainStatus(out []byte) []FileChange {
-	if len(out) == 0 {
-		return nil
-	}
-	seen := make(map[string]FileChange)
-	var order []string
-	records := strings.Split(string(out), "\x00")
-	for i := 0; i < len(records); i++ {
-		rec := records[i]
-		if len(rec) < 4 {
-			continue
-		}
-		status := rec[0:2]
-		path := rec[3:]
-		deleted := status[0] == 'D' || status[1] == 'D'
-		// Renames/copies: next NUL-delimited record is the new (destination) path
-		if status[0] == 'R' || status[0] == 'C' || status[1] == 'R' || status[1] == 'C' {
-			i++
-			if i < len(records) {
-				path = records[i]
-			}
-		}
-		if _, exists := seen[path]; !exists {
-			order = append(order, path)
-		}
-		seen[path] = FileChange{Path: path, Deleted: deleted}
-	}
-	changes := make([]FileChange, 0, len(order))
-	for _, p := range order {
-		changes = append(changes, seen[p])
-	}
-	return changes
-}
-
-// gitChangedFiles returns all changed files with delete status.
-func gitChangedFiles(rootDir string) ([]FileChange, error) {
-	cmd := exec.Command("git", "status", "--porcelain=v1", "-z", "-uall")
-	cmd.Dir = rootDir
-	out, err := cmd.Output()
-	if err != nil {
-		return nil, err
-	}
-	return parsePorcelainStatus(out), nil
-}
-
-// gitChangedFilesInDir returns changed files within a specific directory.
-func gitChangedFilesInDir(rootDir, dir string) ([]FileChange, error) {
-	cmd := exec.Command("git", "status", "--porcelain=v1", "-z", "-uall", "--", dir)
-	cmd.Dir = rootDir
-	out, err := cmd.Output()
-	if err != nil {
-		return nil, err
-	}
-	return parsePorcelainStatus(out), nil
-}
-
-// gitStagedChanges returns staged files with delete status.
-// Uses -z for NUL-delimited machine-safe output.
-//
-// Format with --name-status -z: records are NUL-separated as "status\0path\0".
-// For renames/copies (status starts with R or C, e.g. "R100"), the sequence is
-// "Rnnn\0oldpath\0newpath\0" — three NUL-delimited fields. We consume the old
-// path and use the new path since that's what exists in the index.
-func gitStagedChanges(rootDir string) ([]FileChange, error) {
-	cmd := exec.Command("git", "diff", "--cached", "--name-status", "-z")
-	cmd.Dir = rootDir
-	out, err := cmd.Output()
-	if err != nil {
-		return nil, err
-	}
-	if len(out) == 0 {
-		return nil, nil
-	}
-	seen := make(map[string]FileChange)
-	var order []string
-	records := strings.Split(string(out), "\x00")
-	for i := 0; i < len(records); i++ {
-		status := records[i]
-		if status == "" {
-			continue
-		}
-		i++
-		if i >= len(records) {
-			break
-		}
-		path := records[i]
-		deleted := len(status) > 0 && status[0] == 'D'
-		// Renames/copies: status starts with R or C (e.g. "R100", "C050")
-		if len(status) > 0 && (status[0] == 'R' || status[0] == 'C') {
-			i++
-			if i < len(records) {
-				path = records[i]
-			}
-		}
-		if _, exists := seen[path]; !exists {
-			order = append(order, path)
-		}
-		seen[path] = FileChange{Path: path, Deleted: deleted}
-	}
-	changes := make([]FileChange, 0, len(order))
-	for _, p := range order {
-		changes = append(changes, seen[p])
-	}
-	return changes, nil
 }

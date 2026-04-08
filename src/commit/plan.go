@@ -57,10 +57,13 @@ func (p Plan) Subject(conventional bool) string {
 }
 
 // Message renders the full commit message (subject + optional body).
+// The SF-generated trailer is always appended so that the replay gate
+// can identify and safely rebase these commits.
 func (p Plan) Message(conventional bool) string {
 	msg := p.Subject(conventional)
 	if p.Body != "" {
 		msg += "\n\n" + p.Body
 	}
+	msg += "\n\n" + sfGeneratedTrailer
 	return msg
 }
