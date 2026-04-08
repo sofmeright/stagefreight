@@ -3,14 +3,17 @@ package governance
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
-	"strings"
 
+	git "github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/config"
+	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/go-git/go-git/v5/plumbing/transport"
 	"gopkg.in/yaml.v3"
 
 	"github.com/PrPlanIT/StageFreight/src/config/preset"
+	"github.com/PrPlanIT/StageFreight/src/gitstate"
 )
 
 // LoadGovernance loads governance config and returns a preset loader.
@@ -82,46 +85,99 @@ var (
 
 // fetchRepo clones the policy repo at the given ref into a temp directory.
 // Returns the checkout path. Caller should NOT clean up — immutable for the run.
+// Tries tag ref first, then branch ref, then falls back to fetchBySHA for commit SHAs.
 func fetchRepo(repoURL, ref string) (string, error) {
-	tmpDir, err := os.MkdirTemp("", "sf-governance-*")
+	auth, err := gitstate.ResolveAuthForURL(repoURL)
 	if err != nil {
-		return "", fmt.Errorf("creating temp dir: %w", err)
+		return "", fmt.Errorf("resolving auth: %w", err)
 	}
 
-	// Shallow clone at the specific ref.
-	cmd := exec.Command("git", "clone", "--depth=1", "--branch", ref, "--single-branch", repoURL, tmpDir)
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		// If --branch fails (commit SHA), try fetch approach.
-		os.RemoveAll(tmpDir)
-		return fetchBySHA(repoURL, ref)
+	cloneWithRef := func(refName plumbing.ReferenceName) (string, error) {
+		dir, err := os.MkdirTemp("", "sf-governance-*")
+		if err != nil {
+			return "", err
+		}
+		_, err = git.PlainClone(dir, false, &git.CloneOptions{
+			URL:           repoURL,
+			ReferenceName: refName,
+			SingleBranch:  true,
+			Depth:         1,
+			Auth:          auth,
+		})
+		if err != nil {
+			os.RemoveAll(dir)
+			return "", err
+		}
+		return dir, nil
 	}
 
-	return tmpDir, nil
+	// Try as tag (most governance refs are version tags)
+	if dir, err := cloneWithRef(plumbing.NewTagReferenceName(ref)); err == nil {
+		return dir, nil
+	}
+	// Try as branch
+	if dir, err := cloneWithRef(plumbing.NewBranchReferenceName(ref)); err == nil {
+		return dir, nil
+	}
+	// Fall back to SHA fetch
+	return fetchBySHA(repoURL, ref, auth)
 }
 
-// fetchBySHA handles commit SHA refs that can't use --branch.
-func fetchBySHA(repoURL, sha string) (string, error) {
+// fetchBySHA handles commit SHA refs that can't be cloned via --branch.
+// Uses PlainInit + CreateRemote + Fetch + Checkout to retrieve a specific commit.
+func fetchBySHA(repoURL, sha string, auth transport.AuthMethod) (string, error) {
 	tmpDir, err := os.MkdirTemp("", "sf-governance-*")
 	if err != nil {
 		return "", fmt.Errorf("creating temp dir: %w", err)
 	}
 
-	// Init + fetch specific commit.
-	cmds := [][]string{
-		{"git", "init", tmpDir},
-		{"git", "-C", tmpDir, "remote", "add", "origin", repoURL},
-		{"git", "-C", tmpDir, "fetch", "--depth=1", "origin", sha},
-		{"git", "-C", tmpDir, "checkout", "FETCH_HEAD"},
+	repo, err := git.PlainInit(tmpDir, false)
+	if err != nil {
+		os.RemoveAll(tmpDir)
+		return "", fmt.Errorf("git init: %w", err)
 	}
 
-	for _, args := range cmds {
-		cmd := exec.Command(args[0], args[1:]...)
-		cmd.Stderr = os.Stderr
-		if err := cmd.Run(); err != nil {
-			os.RemoveAll(tmpDir)
-			return "", fmt.Errorf("git %s: %w", strings.Join(args[1:], " "), err)
-		}
+	_, err = repo.CreateRemote(&config.RemoteConfig{
+		Name: "origin",
+		URLs: []string{repoURL},
+	})
+	if err != nil {
+		os.RemoveAll(tmpDir)
+		return "", fmt.Errorf("adding remote: %w", err)
+	}
+
+	// Fetch all named refs before checking out by SHA.
+	//
+	// Design tradeoff: this fetches the full ref namespace (heads + tags), not
+	// just the target commit. Most servers refuse to advertise arbitrary commit
+	// objects by hash directly (uploadpack.allowReachableSHA1InWant is off by
+	// default). Fetching named refs is the only portable way to make the target
+	// commit reachable for checkout.
+	//
+	// This is intentionally more expensive than a single-ref fetch. Governance
+	// policy repos are expected to be small, and SHA-based refs are rare (used
+	// only when a tag or branch ref cannot be used). Depth is intentionally
+	// omitted here because shallow clones can prevent commit object resolution.
+	if err := repo.Fetch(&git.FetchOptions{
+		RemoteName: "origin",
+		RefSpecs: []config.RefSpec{
+			"+refs/heads/*:refs/heads/*",
+			"+refs/tags/*:refs/tags/*",
+		},
+		Auth: auth,
+	}); err != nil {
+		os.RemoveAll(tmpDir)
+		return "", fmt.Errorf("git fetch for %s: %w", sha, err)
+	}
+
+	wt, err := repo.Worktree()
+	if err != nil {
+		os.RemoveAll(tmpDir)
+		return "", fmt.Errorf("worktree: %w", err)
+	}
+	if err := wt.Checkout(&git.CheckoutOptions{Hash: plumbing.NewHash(sha), Force: true}); err != nil {
+		os.RemoveAll(tmpDir)
+		return "", fmt.Errorf("checkout %s: %w", sha, err)
 	}
 
 	return tmpDir, nil
@@ -154,10 +210,7 @@ func FetchFile(repoURL, ref, path string) ([]byte, error) {
 
 	checkoutDir, err := fetchRepo(repoURL, ref)
 	if err != nil {
-		checkoutDir, err = fetchBySHA(repoURL, ref)
-		if err != nil {
-			return nil, fmt.Errorf("fetching %s@%s: %w", repoURL, ref, err)
-		}
+		return nil, fmt.Errorf("fetching %s@%s: %w", repoURL, ref, err)
 	}
 	defer os.RemoveAll(checkoutDir)
 

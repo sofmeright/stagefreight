@@ -5,12 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/spf13/cobra"
+
 	"github.com/PrPlanIT/StageFreight/src/artifact"
 	"github.com/PrPlanIT/StageFreight/src/build/docker"
 	"github.com/PrPlanIT/StageFreight/src/build/pipeline"
@@ -20,6 +21,7 @@ import (
 	"github.com/PrPlanIT/StageFreight/src/config"
 	"github.com/PrPlanIT/StageFreight/src/dependency"
 	"github.com/PrPlanIT/StageFreight/src/forge"
+	"github.com/PrPlanIT/StageFreight/src/gitstate"
 	"github.com/PrPlanIT/StageFreight/src/lint"
 	"github.com/PrPlanIT/StageFreight/src/lint/modules/freshness"
 	"github.com/PrPlanIT/StageFreight/src/output"
@@ -680,13 +682,19 @@ func isDocsAutoCommit(appCfg *config.Config, ciCtx *ci.CIContext) bool {
 }
 
 func gitCommitBody(repoDir, rev string) string {
-	cmd := exec.Command("git", "log", "-1", "--format=%B", rev)
-	cmd.Dir = repoDir
-	out, err := cmd.Output()
+	repo, err := gitstate.OpenRepo(repoDir)
 	if err != nil {
 		return ""
 	}
-	return strings.TrimSpace(string(out))
+	hash, err := repo.ResolveRevision(plumbing.Revision(rev))
+	if err != nil {
+		return ""
+	}
+	commit, err := repo.CommitObject(*hash)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(commit.Message)
 }
 
 func hasTrailer(body, key, value string) bool {

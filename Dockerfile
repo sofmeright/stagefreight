@@ -51,10 +51,11 @@ LABEL maintainer="PrPlanIT <precisionplanit@gmail.com>" \
       org.opencontainers.image.licenses="AGPL-3.0-only" \
       org.opencontainers.image.vendor="PrPlanIT"
 
-# Runtime dependencies — only what stagefreight actually shells out to.
+# Runtime dependencies — git is intentionally absent: the go-git pure-Go transport
+# handles all repository operations natively (SSH via golang.org/x/crypto/ssh,
+# HTTPS via net/http). No git binary, no openssh-client required.
 RUN apk add --no-cache \
       chafa \
-      git \
       tree
 
 # UTF-8 locale for chafa Unicode block characters in CI logs.
