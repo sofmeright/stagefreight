@@ -40,27 +40,34 @@ func OpenSyncSession(rootDir string) (*SyncSession, error) {
 	var auth transport.AuthMethod
 	var httpAuth *githttp.BasicAuth
 
-	if state.RemoteName != "" {
-		remoteURL, remoteErr := RemoteURL(repo, state.RemoteName)
-		if remoteErr == nil {
-			if isSSHURL(remoteURL) {
-				// SSH transport: auth failure is fatal — no silent nil
-				sshAuth, authErr := ResolveAuth(remoteURL)
-				if authErr != nil {
-					return nil, fmt.Errorf("resolving SSH auth for %s: %w", remoteURL, authErr)
-				}
-				auth = sshAuth
-			} else {
-				// HTTPS transport: nil auth is acceptable (public repos)
-				ha, authErr := ResolveHTTPAuth(remoteURL)
-				if authErr != nil {
-					return nil, fmt.Errorf("resolving HTTP auth for %s: %w", remoteURL, authErr)
-				}
-				httpAuth = ha
-				if ha != nil {
-					auth = ha
-				}
-			}
+	// Resolve auth for the effective remote. When no upstream is configured
+	// (first push), RemoteName is empty — fall back to "origin" so auth is
+	// always resolved before Push is called. go-git has no auth fallback of
+	// its own and will error with "SSH agent not found" if auth is nil.
+	effectiveRemote := state.RemoteName
+	if effectiveRemote == "" {
+		effectiveRemote = "origin"
+	}
+	remoteURL, remoteErr := RemoteURL(repo, effectiveRemote)
+	if remoteErr != nil {
+		return nil, fmt.Errorf("resolving remote URL for %s: %w", effectiveRemote, remoteErr)
+	}
+	if isSSHURL(remoteURL) {
+		// SSH transport: auth failure is fatal — no silent nil
+		sshAuth, authErr := ResolveAuth(remoteURL)
+		if authErr != nil {
+			return nil, fmt.Errorf("resolving SSH auth for %s: %w", remoteURL, authErr)
+		}
+		auth = sshAuth
+	} else {
+		// HTTPS transport: nil auth is acceptable (public repos)
+		ha, authErr := ResolveHTTPAuth(remoteURL)
+		if authErr != nil {
+			return nil, fmt.Errorf("resolving HTTP auth for %s: %w", remoteURL, authErr)
+		}
+		httpAuth = ha
+		if ha != nil {
+			auth = ha
 		}
 	}
 
