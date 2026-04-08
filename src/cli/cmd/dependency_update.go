@@ -4,14 +4,15 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/PrPlanIT/StageFreight/src/dependency"
+	"github.com/PrPlanIT/StageFreight/src/gitstate"
 	"github.com/PrPlanIT/StageFreight/src/lint"
 	"github.com/PrPlanIT/StageFreight/src/lint/modules/freshness"
 	"github.com/PrPlanIT/StageFreight/src/output"
@@ -299,28 +300,39 @@ func dryRunUpdateType(dep freshness.Dependency) string {
 	return freshness.DominantUpdateType(delta)
 }
 
-// discoverRepoRootFromDir wraps git rev-parse for the CLI layer.
+// discoverRepoRootFromDir finds the git repository root from the given directory.
 func discoverRepoRootFromDir(dir string) (string, error) {
-	cmd := exec.Command("git", "-C", dir, "rev-parse", "--show-toplevel")
-	out, err := cmd.Output()
+	repo, err := gitstate.OpenRepo(dir)
 	if err != nil {
 		return "", err
 	}
-	return strings.TrimSpace(string(out)), nil
+	return gitstate.RepoRoot(repo)
 }
 
-func gitTrackedFilesFromDir(ctx context.Context, repoRoot string) (map[string]bool, error) {
-	cmd := exec.CommandContext(ctx, "git", "-C", repoRoot, "ls-files")
-	out, err := cmd.Output()
+func gitTrackedFilesFromDir(_ context.Context, repoRoot string) (map[string]bool, error) {
+	repo, err := gitstate.OpenRepo(repoRoot)
 	if err != nil {
 		return nil, err
 	}
-	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
-	tracked := make(map[string]bool, len(lines))
-	for _, l := range lines {
-		if l != "" {
-			tracked[l] = true
-		}
+	head, err := repo.Head()
+	if err != nil {
+		return nil, fmt.Errorf("resolving HEAD: %w", err)
+	}
+	commit, err := repo.CommitObject(head.Hash())
+	if err != nil {
+		return nil, fmt.Errorf("loading HEAD commit: %w", err)
+	}
+	tree, err := commit.Tree()
+	if err != nil {
+		return nil, fmt.Errorf("loading HEAD tree: %w", err)
+	}
+	tracked := make(map[string]bool)
+	err = tree.Files().ForEach(func(f *object.File) error {
+		tracked[f.Name] = true
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("iterating tree: %w", err)
 	}
 	return tracked, nil
 }

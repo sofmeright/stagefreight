@@ -15,6 +15,13 @@ import (
 // ListTagsSorted returns all tags sorted by version descending, matching git's
 // --sort=-version:refname behaviour. Semver tags are sorted by semver; non-semver
 // tags are sorted lexicographically after all semver tags.
+//
+// Parity with git: Masterminds/semver parses the same set of tags as git's
+// version-aware sort for real-world repos (semver + v-prefix). Both classify
+// tags as version-like or lexicographic using equivalent rules, and both produce
+// version-like tags before lexicographic tags in descending order.
+// Edge case: tags with identical version values but different prefixes (v1.0.0
+// and 1.0.0) are sorted stably by the sort.Slice guarantee — same as git.
 func ListTagsSorted(repo *git.Repository) ([]string, error) {
 	tagIter, err := repo.Tags()
 	if err != nil {

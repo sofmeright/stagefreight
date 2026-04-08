@@ -7,9 +7,17 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
+	git "github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/go-git/go-git/v5/plumbing/filemode"
+	fdiff "github.com/go-git/go-git/v5/plumbing/format/diff"
+	"github.com/sergi/go-diff/diffmatchpatch"
+
+	"github.com/PrPlanIT/StageFreight/src/gitstate"
 	"github.com/PrPlanIT/StageFreight/src/lint/modules/freshness"
 	"github.com/PrPlanIT/StageFreight/src/version"
 )
@@ -50,7 +58,6 @@ type vulnJSON struct {
 }
 
 // GenerateArtifacts creates output files in the specified directory.
-// Uses repoRoot for all git operations (git diff, git apply --check).
 func GenerateArtifacts(ctx context.Context, repoRoot, outputDir string, result *UpdateResult, bundle bool) ([]string, error) {
 	if err := os.MkdirAll(outputDir, 0o755); err != nil {
 		return nil, fmt.Errorf("creating output dir: %w", err)
@@ -87,7 +94,7 @@ func GenerateArtifacts(ctx context.Context, repoRoot, outputDir string, result *
 	// 4. deps-updated.tgz (only if bundle && changes exist in working tree)
 	if bundle && len(result.Applied) > 0 {
 		bundleFile := filepath.Join(outputDir, "deps-updated.tgz")
-		if err := writeBundle(ctx, repoRoot, bundleFile); err != nil {
+		if err := writeBundle(ctx, repoRoot, bundleFile, result.FilesChanged); err != nil {
 			return artifacts, fmt.Errorf("writing deps-updated.tgz: %w", err)
 		}
 		if _, err := os.Stat(bundleFile); err == nil {
@@ -234,48 +241,170 @@ func writeReport(path string, result *UpdateResult) error {
 	return os.WriteFile(path, []byte(b.String()), 0o644)
 }
 
-func writePatch(ctx context.Context, repoRoot, patchFile string) error {
-	// Generate patch
-	cmd := exec.CommandContext(ctx, "git", "-C", repoRoot, "diff", "--no-ext-diff", "--binary", "--patch")
-	patchData, err := cmd.Output()
+// --- go-git diff interface implementations ---
+
+type diffFileEntry struct {
+	hash plumbing.Hash
+	mode filemode.FileMode
+	path string
+}
+
+func (f *diffFileEntry) Hash() plumbing.Hash     { return f.hash }
+func (f *diffFileEntry) Mode() filemode.FileMode { return f.mode }
+func (f *diffFileEntry) Path() string            { return f.path }
+
+type diffChunk struct {
+	content string
+	op      fdiff.Operation
+}
+
+func (c *diffChunk) Content() string       { return c.content }
+func (c *diffChunk) Type() fdiff.Operation { return c.op }
+
+type diffFilePatch struct {
+	from, to fdiff.File
+	chunks   []fdiff.Chunk
+}
+
+func (p *diffFilePatch) IsBinary() bool                  { return false }
+func (p *diffFilePatch) Files() (fdiff.File, fdiff.File) { return p.from, p.to }
+func (p *diffFilePatch) Chunks() []fdiff.Chunk           { return p.chunks }
+
+type diffPatch struct {
+	filePatches []fdiff.FilePatch
+}
+
+func (p *diffPatch) FilePatches() []fdiff.FilePatch { return p.filePatches }
+func (p *diffPatch) Message() string                { return "" }
+
+// writePatch generates a StageFreight-native unified diff artifact.
+// This is NOT git-apply compatible — it is a deterministic inspection artifact.
+// Character-level diffs via diffmatchpatch; no rename/copy detection; no binary handling.
+func writePatch(_ context.Context, repoRoot, patchFile string) error {
+	repo, err := gitstate.OpenRepo(repoRoot)
 	if err != nil {
-		return fmt.Errorf("generating patch: %w", err)
+		return fmt.Errorf("opening repo: %w", err)
 	}
 
-	if len(patchData) == 0 {
+	wt, err := repo.Worktree()
+	if err != nil {
+		return fmt.Errorf("opening worktree: %w", err)
+	}
+
+	status, err := wt.Status()
+	if err != nil {
+		return fmt.Errorf("reading worktree status: %w", err)
+	}
+
+	headRef, err := repo.Head()
+	if err != nil {
+		return fmt.Errorf("resolving HEAD: %w", err)
+	}
+	headCommit, err := repo.CommitObject(headRef.Hash())
+	if err != nil {
+		return fmt.Errorf("resolving HEAD commit: %w", err)
+	}
+	headTree, err := headCommit.Tree()
+	if err != nil {
+		return fmt.Errorf("resolving HEAD tree: %w", err)
+	}
+
+	dmp := diffmatchpatch.New()
+
+	// Sort paths for deterministic output.
+	paths := make([]string, 0, len(status))
+	for p := range status {
+		paths = append(paths, p)
+	}
+	sort.Strings(paths)
+
+	var filePatches []fdiff.FilePatch
+	for _, path := range paths {
+		fs := status[path]
+		if fs.Worktree == git.Unmodified && fs.Staging == git.Unmodified {
+			continue
+		}
+
+		var oldContent, newContent string
+		var fromFile, toFile fdiff.File
+
+		// Read old content from HEAD tree (nil for new/untracked files).
+		if treeFile, tErr := headTree.File(path); tErr == nil {
+			var cErr error
+			oldContent, cErr = treeFile.Contents()
+			if cErr != nil {
+				return fmt.Errorf("reading %s from HEAD: %w", path, cErr)
+			}
+			fromFile = &diffFileEntry{
+				hash: plumbing.ComputeHash(plumbing.BlobObject, []byte(oldContent)),
+				mode: filemode.Regular,
+				path: path,
+			}
+		}
+
+		// Read new content from disk (nil for deleted files).
+		if data, rErr := os.ReadFile(filepath.Join(repoRoot, path)); rErr == nil {
+			newContent = string(data)
+			toFile = &diffFileEntry{
+				hash: plumbing.ComputeHash(plumbing.BlobObject, []byte(newContent)),
+				mode: filemode.Regular,
+				path: path,
+			}
+		}
+
+		if fromFile == nil && toFile == nil {
+			continue
+		}
+
+		diffs := dmp.DiffMain(oldContent, newContent, false)
+		chunks := make([]fdiff.Chunk, 0, len(diffs))
+		for _, d := range diffs {
+			var op fdiff.Operation
+			switch d.Type {
+			case diffmatchpatch.DiffEqual:
+				op = fdiff.Equal
+			case diffmatchpatch.DiffInsert:
+				op = fdiff.Add
+			case diffmatchpatch.DiffDelete:
+				op = fdiff.Delete
+			default:
+				continue
+			}
+			chunks = append(chunks, &diffChunk{content: d.Text, op: op})
+		}
+
+		filePatches = append(filePatches, &diffFilePatch{
+			from:   fromFile,
+			to:     toFile,
+			chunks: chunks,
+		})
+	}
+
+	if len(filePatches) == 0 {
 		return nil // no changes to write
 	}
 
-	// Write patch
-	if err := os.WriteFile(patchFile, patchData, 0o644); err != nil {
-		return err
+	f, err := os.Create(patchFile)
+	if err != nil {
+		return fmt.Errorf("creating patch file: %w", err)
 	}
+	defer f.Close()
 
-	// Validate patch
-	checkCmd := exec.CommandContext(ctx, "git", "-C", repoRoot, "apply", "--check", patchFile)
-	if out, err := checkCmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("patch validation failed: %s\n%w", string(out), err)
+	patch := &diffPatch{filePatches: filePatches}
+	if err := fdiff.NewUnifiedEncoder(f, fdiff.DefaultContextLines).Encode(patch); err != nil {
+		return fmt.Errorf("encoding patch: %w", err)
 	}
 
 	return nil
 }
 
-func writeBundle(ctx context.Context, repoRoot, bundleFile string) error {
-	// Get list of changed files
-	cmd := exec.CommandContext(ctx, "git", "-C", repoRoot, "diff", "--name-only")
-	out, err := cmd.Output()
-	if err != nil {
-		return err
-	}
-
-	files := strings.TrimSpace(string(out))
-	if files == "" {
+func writeBundle(ctx context.Context, repoRoot, bundleFile string, filesChanged []string) error {
+	if len(filesChanged) == 0 {
 		return nil
 	}
 
-	// Create tar.gz of changed files
 	args := []string{"-czf", bundleFile}
-	for _, f := range strings.Split(files, "\n") {
+	for _, f := range filesChanged {
 		if f != "" {
 			args = append(args, "-C", repoRoot, f)
 		}

@@ -2,9 +2,10 @@ package docker
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/PrPlanIT/StageFreight/src/gitstate"
 )
 
 // EvaluateTrust determines how authoritative the repository discovery is.
@@ -100,17 +101,16 @@ func AllowDestructiveOrphanAction(trust DiscoveryTrust, knownCount, runningCount
 }
 
 // verifyRepoIdentity checks if the repo origin matches expected patterns.
-// Best-effort: if git is not available or this isn't a repo, returns true
+// Best-effort: if the repo cannot be opened or has no remote, returns true
 // (benefit of the doubt — other trust signals will catch issues).
 func verifyRepoIdentity(rootDir string) bool {
-	cmd := exec.Command("git", "config", "--get", "remote.origin.url")
-	cmd.Dir = rootDir
-	out, err := cmd.Output()
+	repo, err := gitstate.OpenRepo(rootDir)
 	if err != nil {
-		// Not a git repo or no remote — can't verify, don't fail on this alone
-		return true
+		return true // not a git repo — can't verify, don't fail on this alone
 	}
-	origin := strings.TrimSpace(string(out))
-	// If we have an origin, it's identity-verifiable
-	return origin != ""
+	origin, err := gitstate.RemoteURL(repo, "origin")
+	if err != nil {
+		return true // no remote configured — can't verify
+	}
+	return strings.TrimSpace(origin) != ""
 }

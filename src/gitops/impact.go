@@ -1,8 +1,12 @@
 package gitops
 
 import (
-	"os/exec"
+	"fmt"
 	"strings"
+
+	"github.com/go-git/go-git/v5/plumbing"
+
+	"github.com/PrPlanIT/StageFreight/src/gitstate"
 )
 
 // ImpactResult describes which kustomizations are affected by a set of changes.
@@ -14,29 +18,67 @@ type ImpactResult struct {
 	UnmappedFiles        []string           // changed files not under any kustomization path
 }
 
-// GetChangedFiles returns files changed between two refs.
+// GetChangedFiles returns files changed between two refs using three-dot
+// (merge-base) diff semantics, with two-dot fallback if merge-base fails.
 func GetChangedFiles(repoDir, base, head string) ([]string, error) {
-	cmd := exec.Command("git", "diff", "--name-only", base+"..."+head)
-	cmd.Dir = repoDir
-	out, err := cmd.Output()
+	repo, err := gitstate.OpenRepo(repoDir)
 	if err != nil {
-		// Try without three-dot (for cases where merge-base fails)
-		cmd = exec.Command("git", "diff", "--name-only", base, head)
-		cmd.Dir = repoDir
-		out, err = cmd.Output()
-		if err != nil {
-			return nil, err
-		}
+		return nil, fmt.Errorf("opening repo: %w", err)
+	}
+
+	baseHash, err := gitstate.ResolveRef(repo, base)
+	if err != nil {
+		return nil, fmt.Errorf("resolving base ref %q: %w", base, err)
+	}
+	headHash, err := gitstate.ResolveRef(repo, head)
+	if err != nil {
+		return nil, fmt.Errorf("resolving head ref %q: %w", head, err)
+	}
+
+	baseCommit, err := repo.CommitObject(plumbing.NewHash(baseHash))
+	if err != nil {
+		return nil, err
+	}
+	headCommit, err := repo.CommitObject(plumbing.NewHash(headHash))
+	if err != nil {
+		return nil, err
+	}
+
+	// Three-dot: diff from merge base to head.
+	fromCommit := baseCommit
+	if bases, mergeErr := baseCommit.MergeBase(headCommit); mergeErr == nil && len(bases) > 0 {
+		fromCommit = bases[0]
+	}
+
+	fromTree, err := fromCommit.Tree()
+	if err != nil {
+		return nil, err
+	}
+	toTree, err := headCommit.Tree()
+	if err != nil {
+		return nil, err
+	}
+
+	changes, err := fromTree.Diff(toTree)
+	if err != nil {
+		return nil, fmt.Errorf("computing diff: %w", err)
 	}
 
 	var files []string
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		if line != "" {
-			files = append(files, NormalizePath(line))
+	for _, c := range changes {
+		// For renames/inserts/modifies, To.Name is the new path.
+		// For deletes, To.Name is empty — fall back to From.Name.
+		path := c.To.Name
+		if path == "" {
+			path = c.From.Name
+		}
+		if path != "" {
+			files = append(files, NormalizePath(path))
 		}
 	}
 	return files, nil
 }
+
 
 // ComputeImpact determines which kustomizations are affected by changed files.
 // Walks the reverse dependency graph to find transitive dependents.

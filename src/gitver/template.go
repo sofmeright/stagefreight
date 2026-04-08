@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/PrPlanIT/StageFreight/src/gitstate"
 )
 
 // ResolveTemplate expands template variables in a single string against
@@ -470,24 +472,20 @@ func resolveCommitDate(s string, rootDir string) string {
 	if !strings.Contains(s, "{commit.date}") {
 		return s
 	}
-	dateStr, err := gitCmd(rootDir, "log", "-1", "--format=%aI", "HEAD")
+	repo, err := gitstate.OpenRepo(rootDir)
 	if err != nil {
 		return strings.ReplaceAll(s, "{commit.date}", "")
 	}
-	// Parse ISO 8601 date and format as YYYY-MM-DD
-	t, err := time.Parse(time.RFC3339, strings.TrimSpace(dateStr))
+	head, err := repo.Head()
 	if err != nil {
-		// Try alternative ISO format (some git versions use +00:00 instead of Z)
-		t, err = time.Parse("2006-01-02T15:04:05-07:00", strings.TrimSpace(dateStr))
-		if err != nil {
-			// Fallback: take first 10 chars (YYYY-MM-DD) if available
-			if len(dateStr) >= 10 {
-				return strings.ReplaceAll(s, "{commit.date}", dateStr[:10])
-			}
-			return strings.ReplaceAll(s, "{commit.date}", dateStr)
-		}
+		return strings.ReplaceAll(s, "{commit.date}", "")
 	}
-	return strings.ReplaceAll(s, "{commit.date}", t.UTC().Format("2006-01-02"))
+	c, err := repo.CommitObject(head.Hash())
+	if err != nil {
+		return strings.ReplaceAll(s, "{commit.date}", "")
+	}
+	t := c.Author.When.UTC()
+	return strings.ReplaceAll(s, "{commit.date}", t.Format("2006-01-02"))
 }
 
 // resolveProjectMeta replaces {project.*} templates with auto-detected project metadata.

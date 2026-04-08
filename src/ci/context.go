@@ -2,8 +2,9 @@ package ci
 
 import (
 	"os"
-	"os/exec"
-	"strings"
+
+	"github.com/PrPlanIT/StageFreight/src/diag"
+	"github.com/PrPlanIT/StageFreight/src/gitstate"
 )
 
 // CIContext holds normalized CI environment information.
@@ -51,16 +52,33 @@ func ResolveContext() *CIContext {
 		PipelineID:    os.Getenv("SF_CI_PIPELINE_ID"),
 	}
 
-	// Local fallbacks via git inspection
-	if ctx.SHA == "" {
-		ctx.SHA = gitOutput("rev-parse", "HEAD")
-	}
-	if ctx.Branch == "" && ctx.Tag == "" {
-		ctx.Branch = gitOutput("rev-parse", "--abbrev-ref", "HEAD")
-		if ctx.Branch == "HEAD" {
-			// Detached HEAD — check for tag
-			ctx.Branch = ""
-			ctx.Tag = gitOutput("describe", "--tags", "--exact-match", "HEAD")
+	// Local fallbacks via go-git inspection (no git binary required).
+	// Only runs when SF_CI_* env vars are not set (local dev, not CI).
+	if ctx.SHA == "" || (ctx.Branch == "" && ctx.Tag == "") {
+		repo, repoErr := gitstate.OpenRepo(ctx.Workspace)
+		if repoErr != nil {
+			diag.Debug(true, "ci context: could not open repo at %s: %v", ctx.Workspace, repoErr)
+		} else {
+			head, headErr := repo.Head()
+			if headErr != nil {
+				diag.Debug(true, "ci context: could not resolve HEAD: %v", headErr)
+			} else {
+				if ctx.SHA == "" {
+					ctx.SHA = head.Hash().String()
+				}
+				if ctx.Branch == "" && ctx.Tag == "" {
+					if head.Name().IsBranch() {
+						ctx.Branch = head.Name().Short()
+					} else {
+						// Detached HEAD — check if at a tag
+						if tag, tagErr := gitstate.ExactTagAtHEAD(repo); tagErr != nil {
+							diag.Debug(true, "ci context: could not resolve tag at HEAD: %v", tagErr)
+						} else {
+							ctx.Tag = tag
+						}
+					}
+				}
+			}
 		}
 	}
 	if ctx.DefaultBranch == "" {
@@ -78,12 +96,3 @@ func ResolveContext() *CIContext {
 	return ctx
 }
 
-// gitOutput runs a git command and returns trimmed stdout, or empty string on error.
-func gitOutput(args ...string) string {
-	cmd := exec.Command("git", args...)
-	out, err := cmd.Output()
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(out))
-}

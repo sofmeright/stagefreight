@@ -12,6 +12,7 @@ import (
 
 	"github.com/PrPlanIT/StageFreight/src/config"
 	"github.com/PrPlanIT/StageFreight/src/credentials"
+	"github.com/PrPlanIT/StageFreight/src/gitstate"
 )
 
 // gitAuth holds provider-adapted credentials for git transport.
@@ -53,6 +54,13 @@ func buildRemoteURL(repo config.ResolvedRepo) string {
 // forge (origin) to a mirror forge. It clones from origin into a temp bare
 // repo and pushes all heads + tags with force and prune.
 //
+// NOTE: This function calls the git binary for clone and push operations.
+// It is the SOLE remaining git CLI dependency in StageFreight. All other
+// git operations use go-git. This function requires a git binary in the
+// runtime environment or will fail gracefully with Degraded status.
+// Replacement with a native go-git mirror implementation is tracked in the
+// forge-sync project (see project_stagefreight_forge_sync.md).
+//
 // Invariants:
 //   - Never mutates the user's working repo (temp bare clone only)
 //   - Credentials are injected via GIT_ASKPASS self-reexec, never in URLs or argv
@@ -73,9 +81,6 @@ func MirrorPush(ctx context.Context, worktree string, mirror config.ResolvedRepo
 		result.Duration = time.Since(start)
 		return result, nil
 	}
-
-	// Ensure git trusts the worktree — container user may differ from repo owner.
-	_ = gitExec(ctx, absWorktree, "config", "--global", "--add", "safe.directory", absWorktree)
 
 	// Resolve the origin remote URL from the worktree. We mirror from origin
 	// (the authoritative distribution surface), not from the worktree filesystem.
@@ -148,19 +153,16 @@ func MirrorPush(ctx context.Context, worktree string, mirror config.ResolvedRepo
 }
 
 // resolveOriginURL reads the origin remote URL from the worktree's git config.
-func resolveOriginURL(ctx context.Context, worktree string) (string, error) {
-	cmd := exec.CommandContext(ctx, "git", "config", "--get", "remote.origin.url")
-	cmd.Dir = worktree
-
-	var stdout bytes.Buffer
-	cmd.Stdout = &stdout
-
-	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("git config --get remote.origin.url: %w", err)
+func resolveOriginURL(_ context.Context, worktree string) (string, error) {
+	repo, err := gitstate.OpenRepo(worktree)
+	if err != nil {
+		return "", fmt.Errorf("opening repo: %w", err)
 	}
-
-	u := strings.TrimSpace(stdout.String())
-	if u == "" {
+	u, err := gitstate.RemoteURL(repo, "origin")
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve origin URL: %w", err)
+	}
+	if strings.TrimSpace(u) == "" {
 		return "", fmt.Errorf("origin remote URL is empty")
 	}
 	return u, nil

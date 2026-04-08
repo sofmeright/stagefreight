@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"sort"
 	"strings"
 	"time"
@@ -20,6 +19,8 @@ import (
 	"github.com/PrPlanIT/StageFreight/src/config"
 	"github.com/PrPlanIT/StageFreight/src/dependency"
 	"github.com/PrPlanIT/StageFreight/src/forge"
+	"github.com/PrPlanIT/StageFreight/src/diag"
+	"github.com/PrPlanIT/StageFreight/src/gitstate"
 	"github.com/PrPlanIT/StageFreight/src/lint"
 	"github.com/PrPlanIT/StageFreight/src/lint/modules/freshness"
 	"github.com/PrPlanIT/StageFreight/src/output"
@@ -657,14 +658,24 @@ func isDocsAutoCommit(appCfg *config.Config, ciCtx *ci.CIContext) bool {
 	return hasTrailer(body, "Cue", "docs/narrator")
 }
 
-func gitCommitBody(repoDir, rev string) string {
-	cmd := exec.Command("git", "log", "-1", "--format=%B", rev)
-	cmd.Dir = repoDir
-	out, err := cmd.Output()
+func gitCommitBody(repoDir, _ string) string {
+	// rev is always "HEAD" at all current call sites.
+	repo, err := gitstate.OpenRepo(repoDir)
 	if err != nil {
+		diag.Debug(true, "gitCommitBody: could not open repo at %s: %v", repoDir, err)
 		return ""
 	}
-	return strings.TrimSpace(string(out))
+	head, err := repo.Head()
+	if err != nil {
+		diag.Debug(true, "gitCommitBody: could not resolve HEAD: %v", err)
+		return ""
+	}
+	c, err := repo.CommitObject(head.Hash())
+	if err != nil {
+		diag.Debug(true, "gitCommitBody: could not load HEAD commit: %v", err)
+		return ""
+	}
+	return strings.TrimSpace(c.Message)
 }
 
 func hasTrailer(body, key, value string) bool {

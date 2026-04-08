@@ -3,11 +3,14 @@ package dependency
 import (
 	"context"
 	"fmt"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
 
+	git "github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing/object"
+
+	"github.com/PrPlanIT/StageFreight/src/gitstate"
 	"github.com/PrPlanIT/StageFreight/src/lint/modules/freshness"
 )
 
@@ -150,51 +153,47 @@ func groupByEcosystem(deps []freshness.Dependency) (gomod, docker []freshness.De
 
 // discoverRepoRoot finds the git repository root from the given directory.
 func discoverRepoRoot(dir string) (string, error) {
-	cmd := exec.Command("git", "-C", dir, "rev-parse", "--show-toplevel")
-	out, err := cmd.Output()
+	repo, err := gitstate.OpenRepo(dir)
 	if err != nil {
 		return "", err
 	}
-	return strings.TrimSpace(string(out)), nil
+	return gitstate.RepoRoot(repo)
 }
 
 // checkGitClean verifies that tracked files have no uncommitted changes.
-func checkGitClean(ctx context.Context, repoRoot string) error {
-	// Check unstaged changes
-	unstaged := exec.CommandContext(ctx, "git", "-C", repoRoot, "diff", "--quiet")
-	if err := unstaged.Run(); err != nil {
-		paths, _ := gitDirtyPaths(ctx, repoRoot, false)
-		return fmt.Errorf("tracked files have unstaged changes:\n%s", strings.Join(paths, "\n"))
-	}
-
-	// Check staged changes
-	staged := exec.CommandContext(ctx, "git", "-C", repoRoot, "diff", "--cached", "--quiet")
-	if err := staged.Run(); err != nil {
-		paths, _ := gitDirtyPaths(ctx, repoRoot, true)
-		return fmt.Errorf("tracked files have staged changes:\n%s", strings.Join(paths, "\n"))
-	}
-
-	return nil
-}
-
-func gitDirtyPaths(ctx context.Context, repoRoot string, cached bool) ([]string, error) {
-	args := []string{"-C", repoRoot, "diff", "--name-only"}
-	if cached {
-		args = append(args, "--cached")
-	}
-	cmd := exec.CommandContext(ctx, "git", args...)
-	out, err := cmd.Output()
+func checkGitClean(_ context.Context, repoRoot string) error {
+	repo, err := gitstate.OpenRepo(repoRoot)
 	if err != nil {
-		return nil, err
+		return fmt.Errorf("opening repo: %w", err)
 	}
-	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
-	var paths []string
-	for _, l := range lines {
-		if l != "" {
-			paths = append(paths, "  "+l)
+	wt, err := repo.Worktree()
+	if err != nil {
+		return fmt.Errorf("opening worktree: %w", err)
+	}
+	status, err := wt.Status()
+	if err != nil {
+		return fmt.Errorf("reading worktree status: %w", err)
+	}
+
+	var unstaged, staged []string
+	for path, s := range status {
+		if s.Worktree != git.Unmodified {
+			unstaged = append(unstaged, "  "+path)
+		}
+		if s.Staging != git.Unmodified {
+			staged = append(staged, "  "+path)
 		}
 	}
-	return paths, nil
+	sort.Strings(unstaged)
+	sort.Strings(staged)
+
+	if len(unstaged) > 0 {
+		return fmt.Errorf("tracked files have unstaged changes:\n%s", strings.Join(unstaged, "\n"))
+	}
+	if len(staged) > 0 {
+		return fmt.Errorf("tracked files have staged changes:\n%s", strings.Join(staged, "\n"))
+	}
+	return nil
 }
 
 // deduplicateAndSort normalizes, deduplicates, and sorts a string slice.
@@ -216,18 +215,31 @@ func deduplicateAndSort(paths []string) []string {
 }
 
 // gitTrackedFiles returns a set of repo-root-relative paths for all tracked files.
-func gitTrackedFiles(ctx context.Context, repoRoot string) (map[string]bool, error) {
-	cmd := exec.CommandContext(ctx, "git", "-C", repoRoot, "ls-files")
-	out, err := cmd.Output()
+func gitTrackedFiles(_ context.Context, repoRoot string) (map[string]bool, error) {
+	repo, err := gitstate.OpenRepo(repoRoot)
 	if err != nil {
 		return nil, err
 	}
-	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
-	tracked := make(map[string]bool, len(lines))
-	for _, l := range lines {
-		if l != "" {
-			tracked[l] = true
-		}
+	head, err := repo.Head()
+	if err != nil {
+		return nil, fmt.Errorf("resolving HEAD: %w", err)
+	}
+	commit, err := repo.CommitObject(head.Hash())
+	if err != nil {
+		return nil, fmt.Errorf("loading HEAD commit: %w", err)
+	}
+	tree, err := commit.Tree()
+	if err != nil {
+		return nil, fmt.Errorf("loading HEAD tree: %w", err)
+	}
+
+	tracked := make(map[string]bool)
+	err = tree.Files().ForEach(func(f *object.File) error {
+		tracked[f.Name] = true
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("iterating tree: %w", err)
 	}
 	return tracked, nil
 }

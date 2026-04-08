@@ -3,12 +3,12 @@ package ci
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"strconv"
 	"strings"
 
 	"github.com/PrPlanIT/StageFreight/src/config"
 	"github.com/PrPlanIT/StageFreight/src/diag"
+	"github.com/PrPlanIT/StageFreight/src/gitstate"
 )
 
 // HandoffDecision describes the outcome of a handoff evaluation.
@@ -136,18 +136,23 @@ func IsBranchHeadFresh(ciCtx *CIContext) bool {
 }
 
 // resolveRemoteHead returns the current HEAD SHA for a branch from the remote.
-// Uses git ls-remote to avoid needing a full fetch.
+// Best-effort — returns "" if the repo cannot be opened or the remote is unreachable.
 func resolveRemoteHead(branch string) string {
-	cmd := exec.Command("git", "ls-remote", "origin", "refs/heads/"+branch)
-	out, err := cmd.Output()
+	workspace := os.Getenv("SF_CI_WORKSPACE")
+	if workspace == "" {
+		return ""
+	}
+	session, err := gitstate.OpenSyncSession(workspace)
 	if err != nil {
+		diag.Debug(true, "freshness: could not open sync session at %s: %v", workspace, err)
 		return ""
 	}
-	parts := strings.Fields(strings.TrimSpace(string(out)))
-	if len(parts) < 1 {
+	hash, err := gitstate.RemoteRefHash(session.Repo(), "origin", branch, session.Auth())
+	if err != nil {
+		diag.Debug(true, "freshness: remote ref lookup failed for %s: %v", branch, err)
 		return ""
 	}
-	return parts[0]
+	return hash.String()
 }
 
 // shortSHA safely truncates a SHA to 8 chars. Returns as-is if shorter.

@@ -226,24 +226,25 @@ func CollectFacts(rootDir string) SubstrateFacts {
 		}
 	}
 
-	// DinD detection: inside container + local socket accessible.
-	// TCP docker endpoints are service-container docker, not socket-mount DinD.
+	// DinD detection: Docker available AND running inside a container.
+	// Covers both socket-mount DinD (unix socket from host or DinD container) and
+	// service-container DinD (DOCKER_HOST=tcp://dind:2376 — GitLab standard pattern).
+	// TCP connectivity is a transport detail, not a disqualifier: the defining property
+	// of DinD is "Docker accessible from within a container", not how the connection is made.
 	if facts.DockerAvailable {
-		if !strings.HasPrefix(dockerHostEnv, "tcp://") {
-			inContainer := false
-			if _, err := os.Stat("/.dockerenv"); err == nil {
-				inContainer = true
-			}
-			if !inContainer {
-				if data, err := os.ReadFile("/proc/self/cgroup"); err == nil {
-					s := string(data)
-					if strings.Contains(s, "docker") || strings.Contains(s, "containerd") {
-						inContainer = true
-					}
+		inContainer := false
+		if _, err := os.Stat("/.dockerenv"); err == nil {
+			inContainer = true
+		}
+		if !inContainer {
+			if data, err := os.ReadFile("/proc/self/cgroup"); err == nil {
+				s := string(data)
+				if strings.Contains(s, "docker") || strings.Contains(s, "containerd") {
+					inContainer = true
 				}
 			}
-			facts.DindDetected = inContainer
 		}
+		facts.DindDetected = inContainer
 	}
 
 	// ── Disk ──────────────────────────────────────────────────────────────────

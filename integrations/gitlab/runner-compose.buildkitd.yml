@@ -132,11 +132,15 @@ services:
         if [ ! -f /etc/gitlab-runner/config.toml ]; then
           echo "Config does not exist, registering runner..."
           gitlab-runner register \
+            --docker-env=DOCKER_HOST=tcp://dind:2376 \
+            --docker-env=DOCKER_TLS_VERIFY=1 \
+            --docker-env=DOCKER_CERT_PATH=/certs/client \
             --docker-image=alpine:latest \
             --docker-network-mode=stagefreight \
             --docker-privileged=false \
             --docker-volumes=${SF_RUNTIME_PATH:-/opt/stagefreight}:/stagefreight \
             --docker-volumes=${SF_BUILDKIT_CERTS_PATH:-/opt/buildkitd-certs}/client:/buildkit-certs:ro \
+            --docker-volumes=${SF_CERTS_PATH:-/opt/certs}/client:/certs/client:ro \
             --executor=docker \
             --name=$${RUNNER_NAME:-"StageFreight Runner"} \
             --non-interactive \

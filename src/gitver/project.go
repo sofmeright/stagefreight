@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/PrPlanIT/StageFreight/src/gitstate"
 )
 
 // ProjectMeta holds project-level metadata resolved from git and filesystem.
@@ -28,10 +30,11 @@ func DetectProject(rootDir string) *ProjectMeta {
 	pm := &ProjectMeta{}
 
 	// Name and URL from git remote origin
-	remote, err := gitCmd(rootDir, "config", "--get", "remote.origin.url")
-	if err == nil && remote != "" {
-		pm.URL = remoteToHTTPS(remote)
-		pm.Name = repoNameFromRemote(remote)
+	if repo, err := gitstate.OpenRepo(rootDir); err == nil {
+		if remote, err := gitstate.RemoteURL(repo, "origin"); err == nil && remote != "" {
+			pm.URL = remoteToHTTPS(remote)
+			pm.Name = repoNameFromRemote(remote)
+		}
 	}
 
 	// License from LICENSE file

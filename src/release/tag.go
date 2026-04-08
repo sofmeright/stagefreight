@@ -1,12 +1,16 @@
 package release
 
 import (
-	"bytes"
 	"fmt"
-	"os/exec"
-	"strings"
+	"time"
+
+	git "github.com/go-git/go-git/v5"
+	gitconfig "github.com/go-git/go-git/v5/config"
+	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/go-git/go-git/v5/plumbing/object"
 
 	"github.com/PrPlanIT/StageFreight/src/config"
+	"github.com/PrPlanIT/StageFreight/src/gitstate"
 )
 
 // TagPlan is the fully resolved release tag plan.
@@ -121,54 +125,60 @@ func BuildTagPlan(repoDir string, opts BuildTagPlanOptions) (*TagPlan, error) {
 
 // ResolveGitRef resolves any git ref to a commit SHA.
 func ResolveGitRef(repoDir, ref string) (string, error) {
-	cmd := exec.Command("git", "rev-parse", "--verify", ref+"^{commit}")
-	cmd.Dir = repoDir
-	out, err := cmd.Output()
+	repo, err := gitstate.OpenRepo(repoDir)
 	if err != nil {
-		return "", fmt.Errorf("ref %q does not resolve to a commit", ref)
+		return "", fmt.Errorf("opening repo: %w", err)
 	}
-	return strings.TrimSpace(string(out)), nil
+	return gitstate.ResolveRef(repo, ref)
 }
 
 // CreateAnnotatedTag creates an annotated git tag on a specific commit.
 func CreateAnnotatedTag(repoDir, tag, targetSHA, message string) error {
-	cmd := exec.Command("git", "tag", "-a", tag, targetSHA, "-m", message)
-	cmd.Dir = repoDir
-	out, err := cmd.CombinedOutput()
+	repo, err := gitstate.OpenRepo(repoDir)
 	if err != nil {
-		return fmt.Errorf("creating tag %s: %s: %w", tag, strings.TrimSpace(string(out)), err)
+		return fmt.Errorf("opening repo: %w", err)
+	}
+	hash := plumbing.NewHash(targetSHA)
+	_, err = repo.CreateTag(tag, hash, &git.CreateTagOptions{
+		Tagger:  resolveTaggerSignature(repo),
+		Message: message,
+	})
+	if err != nil {
+		return fmt.Errorf("creating tag %s: %w", tag, err)
 	}
 	return nil
 }
 
 // PushTag pushes a tag to the given remote.
 func PushTag(repoDir, remote, tag string) error {
-	cmd := exec.Command("git", "push", remote, tag)
-	cmd.Dir = repoDir
-	out, err := cmd.CombinedOutput()
+	session, err := gitstate.OpenSyncSession(repoDir)
 	if err != nil {
-		return fmt.Errorf("pushing tag %s: %s: %w", tag, strings.TrimSpace(string(out)), err)
+		return fmt.Errorf("opening sync session: %w", err)
+	}
+	refspec := "refs/tags/" + tag + ":refs/tags/" + tag
+	if err := session.Push(remote, refspec, false); err != nil {
+		return fmt.Errorf("pushing tag %s to %s: %w", tag, remote, err)
 	}
 	return nil
 }
 
 // tagExists checks if a git tag already exists.
 func tagExists(repoDir, tag string) bool {
-	cmd := exec.Command("git", "rev-parse", "--verify", "refs/tags/"+tag)
-	cmd.Dir = repoDir
-	return cmd.Run() == nil
+	repo, err := gitstate.OpenRepo(repoDir)
+	if err != nil {
+		return false
+	}
+	_, err = gitstate.ResolveRef(repo, "refs/tags/"+tag)
+	return err == nil
 }
 
 // countCommits returns the number of commits in a range.
 func countCommits(repoDir, from, to string) int {
-	cmd := exec.Command("git", "rev-list", "--count", from+".."+to)
-	cmd.Dir = repoDir
-	out, err := cmd.Output()
+	repo, err := gitstate.OpenRepo(repoDir)
 	if err != nil {
 		return 0
 	}
-	n := 0
-	fmt.Sscanf(strings.TrimSpace(string(out)), "%d", &n)
+	n, _ := gitstate.CountCommitsBetween(repo, from, to)
 	return n
 }
 
@@ -180,33 +190,38 @@ type diffStatsResult struct {
 
 // diffStats returns diff statistics for a range.
 func diffStats(repoDir, from, to string) diffStatsResult {
-	cmd := exec.Command("git", "diff", "--shortstat", from+".."+to)
-	cmd.Dir = repoDir
-	var stdout bytes.Buffer
-	cmd.Stdout = &stdout
-	if err := cmd.Run(); err != nil {
+	repo, err := gitstate.OpenRepo(repoDir)
+	if err != nil {
 		return diffStatsResult{}
 	}
+	files, insertions, deletions, err := gitstate.DiffStats(repo, from, to)
+	if err != nil {
+		return diffStatsResult{}
+	}
+	return diffStatsResult{files: files, insertions: insertions, deletions: deletions}
+}
 
-	var result diffStatsResult
-	line := strings.TrimSpace(stdout.String())
-	// Parse: " 18 files changed, 421 insertions(+), 97 deletions(-)"
-	fmt.Sscanf(line, "%d file", &result.files)
-	if idx := strings.Index(line, "insertion"); idx > 0 {
-		// Find the number before "insertion"
-		sub := line[:idx]
-		parts := strings.Fields(sub)
-		if len(parts) > 0 {
-			fmt.Sscanf(parts[len(parts)-1], "%d", &result.insertions)
+// resolveTaggerSignature resolves the git user identity for tag signing.
+// Resolution order: local config → global config → built-in defaults.
+func resolveTaggerSignature(repo *git.Repository) *object.Signature {
+	name, email := "stagefreight", "stagefreight@localhost"
+	if cfg, err := repo.Config(); err == nil {
+		if cfg.User.Name != "" {
+			name = cfg.User.Name
+		}
+		if cfg.User.Email != "" {
+			email = cfg.User.Email
 		}
 	}
-	if idx := strings.Index(line, "deletion"); idx > 0 {
-		sub := line[:idx]
-		parts := strings.Fields(sub)
-		if len(parts) > 0 {
-			fmt.Sscanf(parts[len(parts)-1], "%d", &result.deletions)
+	if name == "stagefreight" || email == "stagefreight@localhost" {
+		if global, err := gitconfig.LoadConfig(gitconfig.GlobalScope); err == nil {
+			if global.User.Name != "" && name == "stagefreight" {
+				name = global.User.Name
+			}
+			if global.User.Email != "" && email == "stagefreight@localhost" {
+				email = global.User.Email
+			}
 		}
 	}
-
-	return result
+	return &object.Signature{Name: name, Email: email, When: time.Now()}
 }

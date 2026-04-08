@@ -6,12 +6,14 @@ package gitver
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"regexp"
 	"sort"
 	"strings"
 
+	git "github.com/go-git/go-git/v5"
+
 	"github.com/PrPlanIT/StageFreight/src/diag"
+	"github.com/PrPlanIT/StageFreight/src/gitstate"
 )
 
 // VersionInfo holds resolved version metadata from git.
@@ -121,17 +123,26 @@ func DetectVersionWithOpts(rootDir string, opts *VersioningOpts) (*VersionInfo, 
 
 	v := &VersionInfo{}
 
+	// Open repo once — all git operations below use this handle.
+	repo, err := gitstate.OpenRepo(rootDir)
+	if err != nil {
+		return nil, fmt.Errorf("opening repo at %s: %w", rootDir, err)
+	}
+
 	// Current SHA
-	sha, err := gitCmd(rootDir, "rev-parse", "--short=7", "HEAD")
+	head, err := repo.Head()
 	if err != nil {
 		return nil, fmt.Errorf("getting HEAD SHA: %w", err)
 	}
+	sha := head.Hash().String()
+	if len(sha) > 7 {
+		sha = sha[:7]
+	}
 	v.SHA = sha
 
-	// Current branch
-	branch, err := gitCmd(rootDir, "rev-parse", "--abbrev-ref", "HEAD")
-	if err == nil {
-		v.Branch = branch
+	// Current branch (empty in detached HEAD / tag builds)
+	if head.Name().IsBranch() {
+		v.Branch = head.Name().Short()
 	}
 
 	// Compile tag source regexes once. No runtime compile in the hot path.
@@ -159,15 +170,10 @@ func DetectVersionWithOpts(rootDir string, opts *VersioningOpts) (*VersionInfo, 
 	// git's ordering or results will be surprising.
 	// StageFreight WILL NOT reinterpret or re-sort tags — doing so would
 	// invite semantic leakage back into gitver.
-	tagsOut, _ := gitCmd(rootDir, "tag", "--list", "--sort=-v:refname")
-	if tagsOut == "" {
-		// Shallow clone? Fetch tags and retry once.
-		if shallow, _ := gitCmd(rootDir, "rev-parse", "--is-shallow-repository"); shallow == "true" {
-			_, _ = gitCmd(rootDir, "fetch", "--tags", "--depth=1")
-			tagsOut, _ = gitCmd(rootDir, "tag", "--list", "--sort=-v:refname")
-		}
-	}
-	tags := splitLines(tagsOut)
+	tags, _ := gitstate.ListTagsSorted(repo)
+	// Note: shallow clones may have incomplete tag history. If tags is empty
+	// in a shallow CI clone, the no_lineage policy applies. Fetching tags
+	// requires auth and is deferred to a future improvement.
 
 	// Defensive warnings (never block a build).
 	emitTagSourceOverlapWarnings(tags, sourceRes)
@@ -207,7 +213,7 @@ func DetectVersionWithOpts(rootDir string, opts *VersioningOpts) (*VersionInfo, 
 	// Determine if HEAD is exactly at the chosen tag. Uses the FULL tag
 	// (including any prefix) because git's reference is the untransformed
 	// name.
-	if headAtTag(rootDir, chosenTag) {
+	if headAtTag(repo, chosenTag) {
 		v.IsRelease = true
 	}
 
@@ -393,12 +399,12 @@ func renderVersionFormat(format string, v *VersionInfo) string {
 }
 
 // headAtTag returns true if HEAD is exactly at the given tag.
-func headAtTag(rootDir, tag string) bool {
-	out, err := gitCmd(rootDir, "describe", "--tags", "--exact-match", "HEAD")
+func headAtTag(repo *git.Repository, tag string) bool {
+	tagAtHEAD, err := gitstate.ExactTagAtHEAD(repo)
 	if err != nil {
 		return false
 	}
-	return strings.TrimSpace(out) == tag
+	return tagAtHEAD == tag
 }
 
 // splitLines splits git command output into a clean list of non-empty lines.
@@ -484,13 +490,3 @@ func emitNonSemverOrderingWarnings(tags []string, sourceRes map[string]*regexp.R
 	}
 }
 
-// gitCmd runs a git command and returns trimmed stdout.
-func gitCmd(dir string, args ...string) (string, error) {
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	out, err := cmd.Output()
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(string(out)), nil
-}

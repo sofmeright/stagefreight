@@ -34,6 +34,9 @@ services:
       - |
         if [ ! -f /etc/gitlab-runner/config.toml ]; then
           gitlab-runner register \
+            --docker-env=DOCKER_HOST=tcp://dind:2376 \
+            --docker-env=DOCKER_TLS_VERIFY=1 \
+            --docker-env=DOCKER_CERT_PATH=/certs/client \
             --docker-host=tcp://dind:2376 \
             --docker-image=alpine:latest \
             --docker-privileged=true \

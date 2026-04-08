@@ -3,16 +3,14 @@
 package release
 
 import (
-	"bytes"
-	"errors"
 	"fmt"
-	"os/exec"
 	"regexp"
 	"sort"
 	"strings"
 
 	"github.com/PrPlanIT/StageFreight/src/build"
 	"github.com/PrPlanIT/StageFreight/src/config"
+	"github.com/PrPlanIT/StageFreight/src/gitstate"
 	"github.com/PrPlanIT/StageFreight/src/gitver"
 )
 
@@ -252,74 +250,31 @@ func normalizeReleaseVersion(ref string) string {
 }
 
 // listTagsByVersion returns all git tags sorted by version descending.
-// Git's --sort=-version:refname is authoritative; no secondary Go-side sort.
 func listTagsByVersion(repoDir string) ([]string, error) {
-	out, err := runGit(repoDir, "tag", "-l", "--sort=-version:refname")
+	repo, err := gitstate.OpenRepo(repoDir)
 	if err != nil {
-		return nil, fmt.Errorf("list tags by version: %w", err)
+		return nil, fmt.Errorf("opening repo: %w", err)
 	}
-
-	var tags []string
-	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
-		tag := strings.TrimSpace(line)
-		if tag == "" {
-			continue
-		}
-		tags = append(tags, tag)
-	}
-	return tags, nil
+	return gitstate.ListTagsSorted(repo)
 }
 
 // isAncestor returns true if ancestorRef is an ancestor of descendantRef.
 func isAncestor(repoDir, ancestorRef, descendantRef string) (bool, error) {
-	cmd := exec.Command("git", "merge-base", "--is-ancestor", ancestorRef, descendantRef)
-	cmd.Dir = repoDir
-	err := cmd.Run()
-	if err == nil {
-		return true, nil
+	repo, err := gitstate.OpenRepo(repoDir)
+	if err != nil {
+		return false, fmt.Errorf("opening repo: %w", err)
 	}
-	var exitErr *exec.ExitError
-	if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
-		return false, nil
-	}
-	return false, fmt.Errorf("check ancestry %q -> %q: %w", ancestorRef, descendantRef, err)
-}
-
-// runGit executes a git command and returns its stdout.
-func runGit(repoDir string, args ...string) (string, error) {
-	cmd := exec.Command("git", args...)
-	cmd.Dir = repoDir
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		msg := strings.TrimSpace(stderr.String())
-		if msg != "" {
-			return "", fmt.Errorf("git %s: %s: %w", strings.Join(args, " "), msg, err)
-		}
-		return "", fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
-	}
-	return stdout.String(), nil
+	return gitstate.IsAncestor(repo, ancestorRef, descendantRef)
 }
 
 // tagMessage extracts the annotation message from an annotated tag.
 // Returns empty for lightweight tags or on error.
 func tagMessage(repoDir, ref string) string {
-	cmd := exec.Command("git", "for-each-ref", "refs/tags/"+ref, "--format=%(contents)")
-	cmd.Dir = repoDir
-	out, err := cmd.Output()
+	repo, err := gitstate.OpenRepo(repoDir)
 	if err != nil {
 		return ""
 	}
-	msg := string(out)
-
-	// Strip PGP signature block
-	if idx := strings.Index(msg, "-----BEGIN PGP SIGNATURE-----"); idx >= 0 {
-		msg = msg[:idx]
-	}
-
-	return strings.TrimSpace(msg)
+	return gitstate.TagMessage(repo, ref)
 }
 
 // bulletize converts a multi-line text into markdown bullets.
@@ -377,43 +332,28 @@ func releaseType(isPrerelease bool) string {
 
 // ParseCommits extracts conventional commits from a git log range.
 func ParseCommits(repoDir, fromRef, toRef string) ([]Commit, error) {
-	var rangeSpec string
-	if fromRef != "" {
-		rangeSpec = fromRef + ".." + toRef
-	} else {
-		rangeSpec = toRef
+	repo, err := gitstate.OpenRepo(repoDir)
+	if err != nil {
+		return nil, fmt.Errorf("opening repo: %w", err)
 	}
 
-	// Format: hash<SEP>subject<SEP>body<SEP>author
-	cmd := exec.Command("git", "log", rangeSpec, "--format=%H\x1f%s\x1f%b\x1f%aN\x1e")
-	cmd.Dir = repoDir
-	out, err := cmd.Output()
+	rawCommits, err := gitstate.ParseCommitLog(repo, fromRef, toRef)
 	if err != nil {
 		return nil, fmt.Errorf("git log: %w", err)
 	}
 
 	var commits []Commit
-	entries := strings.Split(string(out), "\x1e")
-	for _, entry := range entries {
-		entry = strings.TrimSpace(entry)
-		if entry == "" {
-			continue
+	for _, raw := range rawCommits {
+		subject, body := splitCommitMessage(raw.Message)
+		hash := raw.Hash.String()
+		if len(hash) > 7 {
+			hash = hash[:7]
 		}
-
-		fields := strings.SplitN(entry, "\x1f", 4)
-		if len(fields) < 2 {
-			continue
-		}
-
 		c := Commit{
-			Hash:    fields[0][:7], // short hash
-			Summary: fields[1],
-		}
-		if len(fields) > 2 {
-			c.Body = strings.TrimSpace(fields[2])
-		}
-		if len(fields) > 3 {
-			c.Author = strings.TrimSpace(fields[3])
+			Hash:    hash,
+			Summary: subject,
+			Body:    body,
+			Author:  raw.Author.Name,
 		}
 
 		// Parse conventional commit
@@ -433,6 +373,17 @@ func ParseCommits(repoDir, fromRef, toRef string) ([]Commit, error) {
 	}
 
 	return commits, nil
+}
+
+// splitCommitMessage splits a raw git commit message into subject and body.
+func splitCommitMessage(msg string) (subject, body string) {
+	msg = strings.TrimSpace(msg)
+	parts := strings.SplitN(msg, "\n", 2)
+	subject = strings.TrimSpace(parts[0])
+	if len(parts) > 1 {
+		body = strings.TrimSpace(parts[1])
+	}
+	return
 }
 
 func categorize(commits []Commit) []CommitCategory {
