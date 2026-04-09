@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 
 	"github.com/PrPlanIT/StageFreight/src/lint"
 )
@@ -29,8 +30,14 @@ func (m *noGitExecModule) AutoDetect() []string { return []string{"**/*.go"} }
 var gitExecRe = regexp.MustCompile(`exec\.Command(Context)?\(\s*"git"`)
 
 func (m *noGitExecModule) Check(_ context.Context, file lint.FileInfo) ([]lint.Finding, error) {
-	// The only permitted site for exec.Command("git") is git_mirror.go.
-	if filepath.ToSlash(file.Path) == "src/sync/git_mirror.go" {
+	p := filepath.ToSlash(file.Path)
+	// Permitted sites:
+	//   git_mirror.go     — mirror push retains CLI dependency (tracked: forge-sync)
+	//   nogitexec.go      — this module; pattern appears in comments and the error message
+	//   *_test.go         — tests run in the builder image which has git, not the runtime image
+	if p == "src/sync/git_mirror.go" ||
+		p == "src/lint/modules/nogitexec.go" ||
+		strings.HasSuffix(p, "_test.go") {
 		return nil, nil
 	}
 
