@@ -12,13 +12,14 @@ import (
 
 	"github.com/PrPlanIT/StageFreight/src/atomicfile"
 	"github.com/PrPlanIT/StageFreight/src/config"
+	"github.com/PrPlanIT/StageFreight/src/version"
 )
 
 // cacheSchemaVersion is bumped whenever the cache entry format or
 // finding semantics change. This invalidates stale entries automatically.
 // Bump this when: finding fields change, severity logic changes, or
 // module output format changes.
-const cacheSchemaVersion = "1"
+const cacheSchemaVersion = "2"
 
 // Cache provides content-addressed lint result caching.
 // Dir is the resolved cache directory (call ResolveCacheDir to compute it).
@@ -86,13 +87,17 @@ func ResolveCacheDir(rootDir string, configDir string) string {
 	return filepath.Join(base, "stagefreight", "cache", "lint", projectHash)
 }
 
-// Key computes a cache key from file content, module name, and config.
+// Key computes a cache key from file content, module name, config, and
+// the binary's build commit. Including the commit ensures that cache entries
+// are automatically invalidated when the binary changes — no stale results
+// from a prior build's module logic can survive a binary update.
 func (c *Cache) Key(content []byte, moduleName string, configJSON string) string {
 	h := sha256.New()
 	h.Write(content)
 	h.Write([]byte(moduleName))
 	h.Write([]byte(configJSON))
 	h.Write([]byte(cacheSchemaVersion))
+	h.Write([]byte(version.Commit))
 	return hex.EncodeToString(h.Sum(nil))
 }
 
