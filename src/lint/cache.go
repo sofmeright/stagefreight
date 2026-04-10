@@ -5,9 +5,11 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/PrPlanIT/StageFreight/src/atomicfile"
@@ -20,6 +22,32 @@ import (
 // Bump this when: finding fields change, severity logic changes, or
 // module output format changes.
 const cacheSchemaVersion = "2"
+
+// lintEngineVersion returns a string that uniquely identifies the running
+// binary's lint logic. Used in cache keys so stale results never survive
+// a binary change — regardless of whether this is a release or dev build.
+//
+// Release builds: uses the injected commit hash (cheap, deterministic).
+// Dev builds (commit="unknown"): hashes the binary on disk (computed once).
+var lintEngineVersion = sync.OnceValue(func() string {
+	if version.Commit != "unknown" && version.Commit != "" {
+		return version.Commit
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return "unknown"
+	}
+	f, err := os.Open(exe)
+	if err != nil {
+		return "unknown"
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "unknown"
+	}
+	return hex.EncodeToString(h.Sum(nil))[:16]
+})
 
 // Cache provides content-addressed lint result caching.
 // Dir is the resolved cache directory (call ResolveCacheDir to compute it).
@@ -97,7 +125,7 @@ func (c *Cache) Key(content []byte, moduleName string, configJSON string) string
 	h.Write([]byte(moduleName))
 	h.Write([]byte(configJSON))
 	h.Write([]byte(cacheSchemaVersion))
-	h.Write([]byte(version.Commit))
+	h.Write([]byte(lintEngineVersion()))
 	return hex.EncodeToString(h.Sum(nil))
 }
 
