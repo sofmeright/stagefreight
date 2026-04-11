@@ -14,8 +14,10 @@
 package toolchain
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"runtime"
 )
 
@@ -49,36 +51,43 @@ func resolveGo(rootDir, version string) (Result, error) {
 	goos := runtime.GOOS
 	goarch := runtime.GOARCH
 	sourceURL := goDownloadURL(version, goos, goarch)
-	binPath := CacheBinPath(rootDir, "go", version, "go")
 
-	// Check cache — verify binary checksum against metadata
-	if _, err := os.Stat(binPath); err == nil {
-		meta, metaErr := ReadMetadata(rootDir, "go", version)
-		if metaErr == nil && meta.BinSHA256 != "" {
-			actual, hashErr := fileSHA256(binPath)
-			if hashErr == nil && actual == meta.BinSHA256 {
-				return Result{
-					Tool:      "go",
-					Version:   version,
-					Path:      binPath,
-					CacheHit:  true,
-					SourceURL: meta.SourceURL,
-					SHA256:    meta.SHA256,
-					BinSHA256: meta.BinSHA256,
-				}, nil
-			}
+	// Search all read roots for a valid cached install.
+	// Persistent mount is checked first (operator-preseeded or prior install),
+	// then workspace-local. Read-only caches are valid — we only need the binary.
+	for _, root := range ReadRoots(rootDir) {
+		binPath := CacheBinPathIn(root, "go", version, "go")
+		if _, err := os.Stat(binPath); err != nil {
+			continue
 		}
-		// Corrupt or missing metadata — clean and re-download
-		os.RemoveAll(CacheDir(rootDir, "go", version))
+		meta, metaErr := readMetadataFrom(root, "go", version)
+		if metaErr != nil || meta.BinSHA256 == "" {
+			continue // no metadata — skip this root, don't delete (may be read-only)
+		}
+		actual, hashErr := fileSHA256(binPath)
+		if hashErr != nil || actual != meta.BinSHA256 {
+			continue // corrupt — skip, try next root
+		}
+		return Result{
+			Tool:      "go",
+			Version:   version,
+			Path:      binPath,
+			CacheHit:  true,
+			SourceURL: meta.SourceURL,
+			SHA256:    meta.SHA256,
+			BinSHA256: meta.BinSHA256,
+		}, nil
 	}
 
-	// Fetch official checksum for the archive
+	// No valid cache hit — download and install.
+	// Write to the preferred writable root (persistent if available).
+	installRoot := InstallRoot(rootDir)
+
 	expectedSHA, err := fetchGoChecksum(version, goos, goarch)
 	if err != nil {
 		return Result{}, fmt.Errorf("toolchain go %s: fetching checksum: %w", version, err)
 	}
 
-	// Download archive
 	archivePath, err := downloadToTemp(sourceURL)
 	if err != nil {
 		return Result{}, fmt.Errorf("toolchain go %s: download failed: %w", version, err)
@@ -95,19 +104,18 @@ func resolveGo(rootDir, version string) (Result, error) {
 	}
 
 	// Extract
-	destDir := CacheDir(rootDir, "go", version)
+	destDir := CacheDirIn(installRoot, "go", version)
 	if err := extractGoArchive(archivePath, destDir); err != nil {
 		os.RemoveAll(destDir)
 		return Result{}, fmt.Errorf("toolchain go %s: extraction failed: %w", version, err)
 	}
 
-	// Verify binary exists after extraction
+	binPath := CacheBinPathIn(installRoot, "go", version, "go")
 	if _, err := os.Stat(binPath); err != nil {
 		os.RemoveAll(destDir)
 		return Result{}, fmt.Errorf("toolchain go %s: binary not found after extraction at %s", version, binPath)
 	}
 
-	// Compute binary checksum for future cache validation
 	binSHA, err := fileSHA256(binPath)
 	if err != nil {
 		os.RemoveAll(destDir)
@@ -123,7 +131,7 @@ func resolveGo(rootDir, version string) (Result, error) {
 		SHA256:    archiveSHA,
 		BinSHA256: binSHA,
 	}
-	if err := WriteMetadata(rootDir, "go", version, meta); err != nil {
+	if err := writeMetadataTo(installRoot, "go", version, meta); err != nil {
 		os.RemoveAll(destDir)
 		return Result{}, fmt.Errorf("toolchain go %s: metadata write failed (install aborted): %w", version, err)
 	}
@@ -137,4 +145,38 @@ func resolveGo(rootDir, version string) (Result, error) {
 		SHA256:    archiveSHA,
 		BinSHA256: binSHA,
 	}, nil
+}
+
+// readMetadataFrom reads metadata from a specific cache root.
+func readMetadataFrom(root, tool, version string) (Metadata, error) {
+	path := MetadataPathIn(root, tool, version)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return Metadata{}, err
+	}
+	var m Metadata
+	if err := json.Unmarshal(data, &m); err != nil {
+		return Metadata{}, fmt.Errorf("parsing %s: %w", path, err)
+	}
+	return m, nil
+}
+
+// writeMetadataTo writes metadata to a specific cache root atomically.
+func writeMetadataTo(root, tool, version string, m Metadata) error {
+	StampMetadata(&m)
+	dir := CacheDirIn(root, tool, version)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+	target := filepath.Join(dir, ".metadata.json")
+	tmp := target + ".tmp"
+	data, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		return err
+	}
+	data = append(data, '\n')
+	if err := os.WriteFile(tmp, data, 0644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, target)
 }

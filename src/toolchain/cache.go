@@ -5,27 +5,59 @@ import (
 	"path/filepath"
 )
 
-const cacheSubdir = ".stagefreight/toolchains"
+const (
+	cacheSubdir    = ".stagefreight/toolchains"
+	persistentRoot = "/stagefreight/toolchains"
+)
 
-// CacheRoot returns the toolchain cache root directory.
-// Primary: .stagefreight/toolchains/ relative to workspace.
-func CacheRoot(rootDir string) string {
+// ReadRoots returns cache roots to search for existing toolchain installs,
+// in priority order. Persistent mount is checked first (operator-preseeded
+// or previously written), then workspace-local.
+func ReadRoots(rootDir string) []string {
+	var roots []string
+	if info, err := os.Stat(persistentRoot); err == nil && info.IsDir() {
+		roots = append(roots, persistentRoot)
+	}
+	roots = append(roots, filepath.Join(rootDir, cacheSubdir))
+	return roots
+}
+
+// InstallRoot returns the directory where new toolchain installs are written.
+// Prefers persistent mount if writable, otherwise workspace-local.
+func InstallRoot(rootDir string) string {
+	if isWritable(persistentRoot) {
+		return persistentRoot
+	}
 	return filepath.Join(rootDir, cacheSubdir)
 }
 
-// CacheDir returns the versioned install directory for a tool.
-// e.g. .stagefreight/toolchains/go/1.26.1/
-func CacheDir(rootDir, tool, version string) string {
-	return filepath.Join(CacheRoot(rootDir), tool, version)
+// CacheBinPathIn returns the binary path for a tool within a specific cache root.
+func CacheBinPathIn(root, tool, version, binary string) string {
+	return filepath.Join(root, tool, version, "bin", binary)
 }
 
-// CacheBinPath returns the expected binary path within the cache.
-// e.g. .stagefreight/toolchains/go/1.26.1/bin/go
-func CacheBinPath(rootDir, tool, version, binary string) string {
-	return filepath.Join(CacheDir(rootDir, tool, version), "bin", binary)
+// CacheDirIn returns the versioned install directory within a specific cache root.
+func CacheDirIn(root, tool, version string) string {
+	return filepath.Join(root, tool, version)
 }
 
-// EnsureCacheDir creates the cache directory structure if needed.
-func EnsureCacheDir(rootDir, tool, version string) error {
-	return os.MkdirAll(filepath.Join(CacheDir(rootDir, tool, version), "bin"), 0755)
+// MetadataPathIn returns the metadata file path within a specific cache root.
+func MetadataPathIn(root, tool, version string) string {
+	return filepath.Join(root, tool, version, ".metadata.json")
+}
+
+// isWritable returns true if the directory exists, is a directory, and is writable.
+func isWritable(dir string) bool {
+	info, err := os.Stat(dir)
+	if err != nil || !info.IsDir() {
+		return false
+	}
+	tmp := filepath.Join(dir, ".sf-probe")
+	f, err := os.Create(tmp)
+	if err != nil {
+		return false
+	}
+	f.Close()
+	os.Remove(tmp)
+	return true
 }
