@@ -236,6 +236,23 @@ security:
   sbom: true
   release_detail: full
 
+toolchains:
+  desired:
+    trivy:
+      version: "0.69.3"
+    syft:
+      version: "1.42.3"
+    grype:
+      version: "0.110.0"
+    osv-scanner:
+      version: "2.3.5"
+    cosign:
+      version: "3.0.6"
+    flux:
+      version: "2.8.3"
+    kubectl:
+      version: "1.34.2"
+
 badges:
   items:
     - id: build
