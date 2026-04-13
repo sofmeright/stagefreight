@@ -35,9 +35,10 @@ var lockfiles = map[string]bool{
 }
 
 type osvModule struct {
-	once    sync.Once
-	binPath string // resolved binary path, empty if resolution failed
-	desired map[string]config.ToolPinConfig
+	once     sync.Once
+	binPath  string // resolved binary path, empty if resolution failed
+	resolveErr error // non-nil if pinned version failed
+	desired  map[string]config.ToolPinConfig
 }
 
 func (m *osvModule) SetToolchainDesired(desired map[string]config.ToolPinConfig) {
@@ -78,16 +79,17 @@ func (m *osvModule) Check(ctx context.Context, file lint.FileInfo) ([]lint.Findi
 		result, err := toolchain.Resolve(rootDir, "osv-scanner", ver)
 		if err != nil {
 			if pinned {
-				// Pinned version failed — this will surface as no findings,
-				// but the resolve error was already logged by the resolver.
-				// TODO: propagate hard failure through lint module interface.
+				m.resolveErr = fmt.Errorf("osv-scanner pinned version %s failed to resolve: %w", ver, err)
 			}
 			return
 		}
 		m.binPath = result.Path
 	})
+	if m.resolveErr != nil {
+		return nil, m.resolveErr // hard fail — pinned version contract
+	}
 	if m.binPath == "" {
-		return nil, nil
+		return nil, nil // not pinned, not available — silent skip
 	}
 
 	return m.scan(ctx, file)
