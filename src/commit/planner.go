@@ -37,9 +37,12 @@ func BuildPlan(opts PlannerOptions, cfg config.CommitConfig, registry *TypeRegis
 	commitType := opts.Type
 	if commitType == "" && cfg.Conventional {
 		// Parse conventional commit prefix from message: "feat: summary" → type="feat", message="summary"
-		if parsed, rest, bang, ok := parseConventionalPrefix(opts.Message, registry); ok {
+		if parsed, scope, rest, bang, ok := parseConventionalPrefix(opts.Message, registry); ok {
 			commitType = parsed
 			opts.Message = rest
+			if scope != "" && opts.Scope == "" {
+				opts.Scope = scope
+			}
 			if bang {
 				opts.Breaking = true
 			}
@@ -151,43 +154,56 @@ func BuildPlan(opts PlannerOptions, cfg config.CommitConfig, registry *TypeRegis
 	}, nil
 }
 
-// parseConventionalPrefix extracts a conventional commit type prefix from a message.
-// Returns (type, rest-of-message, breaking, true) if a valid prefix was found.
-// Handles: "feat: summary", "fix!: summary", "feat(scope): summary"
+// parseConventionalPrefix extracts a conventional commit type, scope, and breaking
+// marker from a message prefix.
+// Returns (type, scope, rest-of-message, breaking, true) if a valid prefix was found.
+// Handles: "feat: summary", "fix!: summary", "feat(api): summary", "feat(api)!: summary"
 // Only matches if the type is known to the registry (prevents false positives).
-func parseConventionalPrefix(msg string, registry *TypeRegistry) (string, string, bool, bool) {
-	// Find the colon
+func parseConventionalPrefix(msg string, registry *TypeRegistry) (string, string, string, bool, bool) {
 	colonIdx := strings.Index(msg, ":")
-	if colonIdx < 1 || colonIdx > 20 {
-		return "", "", false, false
+	if colonIdx < 1 || colonIdx > 40 {
+		return "", "", "", false, false
 	}
 
 	prefix := msg[:colonIdx]
 	rest := strings.TrimSpace(msg[colonIdx+1:])
 	if rest == "" {
-		return "", "", false, false
+		return "", "", "", false, false
 	}
 
 	// Detect and strip bang (breaking change marker)
 	bang := strings.HasSuffix(prefix, "!")
 	prefix = strings.TrimSuffix(prefix, "!")
 
-	// Strip scope: "feat(scope)" → "feat"
-	if parenIdx := strings.Index(prefix, "("); parenIdx > 0 {
-		prefix = prefix[:parenIdx]
+	// Extract scope: "feat(api)" → type="feat", scope="api"
+	// Rejects: "feat()" (empty scope), "feat(api)extra" (trailing garbage)
+	var scope string
+	if openParen := strings.Index(prefix, "("); openParen > 0 {
+		closeParen := strings.Index(prefix, ")")
+		if closeParen <= openParen+1 {
+			return "", "", "", false, false // missing or empty scope
+		}
+		scope = prefix[openParen+1 : closeParen]
+		if strings.TrimSpace(scope) == "" {
+			return "", "", "", false, false // whitespace-only scope
+		}
+		if strings.TrimSpace(prefix[closeParen+1:]) != "" {
+			return "", "", "", false, false // trailing content after )
+		}
+		prefix = prefix[:openParen]
 	}
 
 	prefix = strings.TrimSpace(prefix)
 	if prefix == "" {
-		return "", "", false, false
+		return "", "", "", false, false
 	}
 
 	// Only accept if the type is known to the registry
 	if _, _, err := registry.Resolve(prefix); err != nil {
-		return "", "", false, false
+		return "", "", "", false, false
 	}
 
-	return prefix, rest, bang, true
+	return prefix, scope, rest, bang, true
 }
 
 // expandPath resolves a single --add path: handles globs, verifies existence,
