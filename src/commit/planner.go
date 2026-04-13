@@ -33,7 +33,18 @@ func BuildPlan(opts PlannerOptions, cfg config.CommitConfig, registry *TypeRegis
 	}
 
 	// 2. Resolve type
+	// Priority: explicit -t flag → parsed from message prefix → config default → "chore"
 	commitType := opts.Type
+	if commitType == "" && cfg.Conventional {
+		// Parse conventional commit prefix from message: "feat: summary" → type="feat", message="summary"
+		if parsed, rest, bang, ok := parseConventionalPrefix(opts.Message, registry); ok {
+			commitType = parsed
+			opts.Message = rest
+			if bang {
+				opts.Breaking = true
+			}
+		}
+	}
 	if commitType == "" {
 		commitType = cfg.DefaultType
 	}
@@ -138,6 +149,45 @@ func BuildPlan(opts PlannerOptions, cfg config.CommitConfig, registry *TypeRegis
 		},
 		SignOff: opts.SignOff,
 	}, nil
+}
+
+// parseConventionalPrefix extracts a conventional commit type prefix from a message.
+// Returns (type, rest-of-message, breaking, true) if a valid prefix was found.
+// Handles: "feat: summary", "fix!: summary", "feat(scope): summary"
+// Only matches if the type is known to the registry (prevents false positives).
+func parseConventionalPrefix(msg string, registry *TypeRegistry) (string, string, bool, bool) {
+	// Find the colon
+	colonIdx := strings.Index(msg, ":")
+	if colonIdx < 1 || colonIdx > 20 {
+		return "", "", false, false
+	}
+
+	prefix := msg[:colonIdx]
+	rest := strings.TrimSpace(msg[colonIdx+1:])
+	if rest == "" {
+		return "", "", false, false
+	}
+
+	// Detect and strip bang (breaking change marker)
+	bang := strings.HasSuffix(prefix, "!")
+	prefix = strings.TrimSuffix(prefix, "!")
+
+	// Strip scope: "feat(scope)" → "feat"
+	if parenIdx := strings.Index(prefix, "("); parenIdx > 0 {
+		prefix = prefix[:parenIdx]
+	}
+
+	prefix = strings.TrimSpace(prefix)
+	if prefix == "" {
+		return "", "", false, false
+	}
+
+	// Only accept if the type is known to the registry
+	if _, _, err := registry.Resolve(prefix); err != nil {
+		return "", "", false, false
+	}
+
+	return prefix, rest, bang, true
 }
 
 // expandPath resolves a single --add path: handles globs, verifies existence,
